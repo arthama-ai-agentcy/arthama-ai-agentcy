@@ -30,6 +30,15 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+if st.sidebar.button("🔌 Tes Koneksi Google Sheets"):
+    try:
+        hasil = arthama_api("list")
+        st.sidebar.success("Koneksi berhasil!")
+        st.write("Hasil tes koneksi:")
+        st.json(hasil)
+    except Exception as e:
+        st.sidebar.error("Koneksi gagal.")
+        st.error(str(e))
 # ---------- Theme ----------
 st.markdown("""
 <style>
