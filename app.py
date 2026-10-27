@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 import requests
 
-
+from google import genai
 def tanya_gemini(pertanyaan):
     model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(pertanyaan)
