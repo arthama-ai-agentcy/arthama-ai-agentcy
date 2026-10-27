@@ -163,30 +163,155 @@ elif page == "Divisi Robot AI":
             if st.button(f"Buat brief kerja — {title}", key=f"brief_{title}"):
                 st.success(f"Brief {title} dicatat di antarmuka ini. Untuk eksekusi AI nyata, sambungkan layanan yang sesuai.")
 
+
 elif page == "Sales CRM":
     st.markdown("## 🎯 Sales CRM — Database Prospek")
-    st.caption("Contoh awal berisi nama perusahaan yang sebelumnya dibahas. Periksa dan perbarui status/kontak sebelum melakukan penawaran.")
-    edited = st.data_editor(st.session_state.leads, num_rows="dynamic", use_container_width=True, key="lead_editor")
-    st.session_state.leads = edited
-    st.download_button("⬇️ Unduh CRM sebagai CSV", st.session_state.leads.to_csv(index=False).encode("utf-8-sig"), "arthama_sales_crm.csv", "text/csv")
-    st.markdown("### Tambah prospek")
-    with st.form("add_lead"):
-        a,b = st.columns(2)
-        company = a.text_input("Nama perusahaan")
-        city = b.text_input("Kota")
-        potential = st.text_input("Layanan potensial")
-        status = st.selectbox("Status", ["Prospek baru","Riset awal","Email terkirim","Menunggu respons","Tertarik","Survei","DP masuk","Tidak lanjut"])
-        follow = st.date_input("Tanggal follow-up", value=date.today())
-        amount = st.number_input("Estimasi nilai proyek (Rp)", min_value=0, step=1000000)
-        submitted = st.form_submit_button("Simpan prospek")
-        if submitted:
-            if company.strip():
-                row = pd.DataFrame([{"Perusahaan":company.strip(),"Kota":city,"Potensi":potential,"Status":status,"Follow-up":str(follow),"Estimasi (Rp)":int(amount)}])
-                st.session_state.leads = pd.concat([st.session_state.leads, row], ignore_index=True)
-                st.success("Prospek ditambahkan untuk sesi ini.")
-                st.rerun()
+    st.caption(
+        "Database prospek Arthama Management yang terhubung "
+        "ke Google Sheets."
+    )
+
+    # Baca database dari Google Sheets
+    try:
+        hasil = arthama_api("list")
+
+        if not hasil.get("success"):
+            st.error("Database belum berhasil dibaca.")
+            st.json(hasil)
+        else:
+            rows = hasil.get("rows", [])
+
+            if rows:
+                headers = [str(h).strip() for h in rows[0]]
+                data_rows = rows[1:]
+
+                # Pertahankan jumlah kolom sesuai header dari Sheet
+                jumlah_kolom = len(headers)
+                data_bersih = []
+
+                for row_data in data_rows:
+                    row_data = list(row_data)
+                    row_data += [""] * max(
+                        0, jumlah_kolom - len(row_data)
+                    )
+                    data_bersih.append(row_data[:jumlah_kolom])
+
+                df = pd.DataFrame(
+                    data_bersih,
+                    columns=headers
+                )
+
+                st.success(
+                    f"Koneksi aktif. Data terbaca: {len(df)} baris."
+                )
+
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                st.download_button(
+                    "⬇️ Unduh database CSV",
+                    df.to_csv(index=False).encode("utf-8-sig"),
+                    "arthama_database_prospek.csv",
+                    "text/csv"
+                )
             else:
-                st.error("Nama perusahaan harus diisi.")
+                st.warning("Google Sheets belum berisi data.")
+
+    except Exception as e:
+        st.error("Gagal mengambil database Google Sheets.")
+        st.code(str(e))
+
+    st.divider()
+    st.markdown("### ➕ Tambah prospek baru")
+    st.caption(
+        "Isi informasi calon klien. Data akan dikirim ke Google Sheets."
+    )
+
+    with st.form("add_lead_permanent"):
+        nama = st.text_input("Nama klien")
+        whatsapp = st.text_input("Nomor WhatsApp")
+        perusahaan = st.text_input("Nama perusahaan")
+        kebutuhan = st.text_input("Kebutuhan acara")
+        tanggal_acara = st.date_input(
+            "Tanggal acara",
+            value=date.today()
+        )
+        jumlah = st.number_input(
+            "Jumlah peserta",
+            min_value=0,
+            step=1
+        )
+        budget = st.text_input(
+            "Budget (contoh: Rp15.000.000)"
+        )
+        status = st.selectbox(
+            "Status prospek",
+            [
+                "Prospek baru",
+                "Riset awal",
+                "Sudah dihubungi",
+                "Menunggu respons",
+                "Tertarik",
+                "Survei",
+                "DP masuk",
+                "Tidak lanjut"
+            ]
+        )
+        tindak_lanjut = st.text_input(
+            "Tindak lanjut berikutnya"
+        )
+        catatan = st.text_area("Catatan")
+
+        submitted = st.form_submit_button(
+            "💾 Simpan ke Google Sheets"
+        )
+
+        if submitted:
+            if not nama.strip() and not perusahaan.strip():
+                st.error(
+                    "Isi minimal nama klien atau nama perusahaan."
+                )
+            else:
+                data_prospek = {
+                    "tanggalMasuk": str(date.today()),
+                    "namaKlien": nama.strip(),
+                    "whatsapp": whatsapp.strip(),
+                    "perusahaan": perusahaan.strip(),
+                    "kebutuhanAcara": kebutuhan.strip(),
+                    "tanggalAcara": str(tanggal_acara),
+                    "jumlahPeserta": int(jumlah),
+                    "budget": budget.strip(),
+                    "statusProspek": status,
+                    "tindakLanjut": tindak_lanjut.strip(),
+                    "catatan": catatan.strip()
+                }
+
+                try:
+                    hasil_simpan = arthama_api(
+                        "add",
+                        data_prospek
+                    )
+
+                    if hasil_simpan.get("success"):
+                        st.success(
+                            "Prospek berhasil dikirim ke Google Sheets."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(
+                            "Data belum dikonfirmasi tersimpan."
+                        )
+                        st.json(hasil_simpan)
+
+                except Exception as e:
+                    st.error(
+                        "Gagal menyimpan prospek. "
+                        "Periksa koneksi Apps Script."
+                    )
+                    st.code(str(e))
 
 elif page == "Studio Konten":
     st.markdown("## 🎨 Studio Konten")
