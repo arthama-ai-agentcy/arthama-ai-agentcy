@@ -246,9 +246,7 @@ elif page == "Divisi Robot AI":
                     st.error("Gemini gagal memberikan jawaban.")
                     st.code(f"{type(e).__name__}: {pesan_error}")
                     
-            except Exception as e:
-                st.error("Gemini gagal memberikan jawaban.")
-                st.code(f"{type(e).__name__}: {e}")
+            
         
 
             
