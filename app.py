@@ -154,23 +154,37 @@ if page == "Command Center":
     st.dataframe(pd.DataFrame(st.session_state.tasks), use_container_width=True, hide_index=True)
     st.info("Prototipe ini belum menjalankan robot secara mandiri. Modul saat ini adalah ruang kerja, pencatatan, dan simulasi alur. Integrasi nyata harus disambungkan dan diuji satu per satu.")
 
-elif page == "Divisi Robot AI":
-    st.markdown("## 🤖 Divisi Robot AI")
-    departments = [
-        ("AI Director","🧭","Mengatur prioritas kerja dan membuat ringkasan mingguan.","Masih berupa rancangan; belum menjalankan agen otomatis."),
-        ("AI Marketing","📣","Membuat ide kampanye, caption, brief gambar, dan kalender konten.","Bisa dipakai sebagai formulir brief; pembuatan konten dilakukan bersama ChatGPT."),
-        ("AI Sales","🎯","Mengelola tahapan prospek, menyiapkan email penawaran, dan follow-up.","CRM demo tersedia; pengiriman email belum aktif."),
-        ("AI Research","🔎","Menyusun daftar target perusahaan berdasarkan informasi publik yang relevan.","Pencarian web harus dilakukan melalui alat yang tersedia; belum ada crawler otomatis."),
-        ("AI Customer Care","💬","Menyiapkan jawaban pertanyaan, kebutuhan acara, tanggal, jumlah peserta, dan anggaran.","Belum terhubung ke WhatsApp/DM."),
-        ("AI Analyst","📊","Membaca performa konten dan pipeline penjualan.","Membutuhkan data analitik yang diimpor atau koneksi API."),
-    ]
-    for title,emoji,desc,status in departments:
-        with st.expander(f"{emoji} {title}", expanded=False):
-            st.write(desc)
-            st.caption(status)
-            st.text_area("Catatan / instruksi divisi", key=f"note_{title}", placeholder=f"Tulis instruksi kerja untuk {title}...")
-            if st.button(f"Buat brief kerja — {title}", key=f"brief_{title}"):
-                st.success(f"Brief {title} dicatat di antarmuka ini. Untuk eksekusi AI nyata, sambungkan layanan yang sesuai.")
+
+elif page == "AI Sales Agent":
+    st.markdown("## 🤖 AI Sales Agent Arthama")
+    st.caption(
+        "Asisten AI untuk membantu penawaran dan penjualan Arthama Management."
+    )
+
+    pertanyaan = st.text_area(
+        "Apa yang ingin kamu kerjakan?",
+        placeholder=(
+            "Contoh: Buatkan pesan WhatsApp penawaran "
+            "paket gathering untuk perusahaan 100 peserta."
+        )
+    )
+
+    if st.button("✨ Tanya Gemini", type="primary"):
+        if pertanyaan.strip():
+            try:
+                with st.spinner("Gemini sedang menyusun jawaban..."):
+                    jawaban = tanya_gemini(pertanyaan)
+
+                st.markdown("### Hasil dari Gemini")
+                st.write(jawaban)
+
+            except Exception as e:
+                st.error("Gemini belum bisa memberikan jawaban.")
+                st.caption(
+                    "Periksa nama model, kuota gratis, dan pengaturan API key."
+                )
+        else:
+            st.warning("Masukkan pertanyaan terlebih dahulu.")
 
 
 elif page == "Sales CRM":
