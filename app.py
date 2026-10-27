@@ -1,13 +1,19 @@
+
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime
-
 import requests
-
 from google import genai
+
+
 def tanya_gemini(pertanyaan):
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(pertanyaan)
+    client = genai.Client(
+        api_key=st.secrets["GEMINI_API_KEY"]
+    )
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=pertanyaan
+    )
     return response.text
 
 def arthama_api(action, data=None):
