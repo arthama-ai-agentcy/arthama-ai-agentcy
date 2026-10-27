@@ -175,8 +175,6 @@ elif page == "Divisi Robot AI":
                 st.markdown("### Hasil dari Gemini")
                 st.write(jawaban)
         
-        else:
-            st.warning("Masukkan pertanyaan terlebih dahulu.")
 
             
 except Exception as e:
