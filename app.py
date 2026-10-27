@@ -174,9 +174,9 @@ elif page == "Divisi Robot AI":
                     jawaban = tanya_gemini(pertanyaan)
                 st.markdown("### Hasil dari Gemini")
                 st.write(jawaban)
-            except Exception as e:
-                st.error("Gemini gagal memberikan jawaban.")
-                st.code(f"{type(e).__name__}: {e}")
+            
+        else:
+            st.warning("Masukkan pertanyaan terlebih dahulu.")
         else:
             st.warning("Masukkan pertanyaan terlebih dahulu.")
 
