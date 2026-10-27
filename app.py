@@ -2,6 +2,27 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 
+import requests
+
+def arthama_api(action, data=None):
+    url = st.secrets["ARTHAMA_WEBAPP_URL"]
+    token = st.secrets["ARTHAMA_API_TOKEN"]
+
+    payload = {
+        "action": action,
+        "token": token,
+    }
+
+    if data is not None:
+        payload["data"] = data
+
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
 st.set_page_config(
     page_title="Arthama Management — AI Agency",
     page_icon="🤖",
