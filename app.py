@@ -157,11 +157,45 @@ if page == "Command Center":
     st.info("Prototipe ini belum menjalankan robot secara mandiri. Modul saat ini adalah ruang kerja, pencatatan, dan simulasi alur. Integrasi nyata harus disambungkan dan diuji satu per satu.")
 
 
+
 elif page == "Divisi Robot AI":
-    st.markdown("## 🤖 AI Sales Agent Arthama")
-    st.caption(
-        "Asisten AI untuk membantu penawaran dan penjualan Arthama Management."
-    )
+    st.markdown("""
+        <style>
+        .ai-title {
+            color: #FFFFFF !important;
+            background: #123B70;
+            padding: 16px;
+            border-radius: 10px;
+            font-size: 26px;
+            font-weight: 700;
+        }
+        .ai-caption {
+            color: #334155 !important;
+            font-size: 16px;
+        }
+        div[data-testid="stTextArea"] label {
+            color: #123B70 !important;
+            font-weight: 700 !important;
+        }
+        div[data-testid="stTextArea"] textarea {
+            background-color: #FFFFFF !important;
+            color: #172033 !important;
+            border: 1px solid #64748B !important;
+            font-size: 16px !important;
+        }
+        div[data-testid="stButton"] button {
+            background-color: #0D6EFD !important;
+            color: #FFFFFF !important;
+            font-weight: 700 !important;
+            border-radius: 8px !important;
+        }
+        </style>
+        <div class="ai-title">🤖 AI Sales Agent Arthama</div>
+        <p class="ai-caption">
+            Asisten AI untuk membantu penawaran dan penjualan
+            Arthama Management.
+        </p>
+    """, unsafe_allow_html=True)
 
     pertanyaan = st.text_area(
         "Apa yang ingin kamu kerjakan?",
@@ -177,19 +211,24 @@ elif page == "Divisi Robot AI":
             st.warning("Masukkan pertanyaan terlebih dahulu.")
         else:
             try:
-                with st.spinner(
-                    "Gemini sedang menyusun jawaban..."
-                ):
+                with st.spinner("Gemini sedang menyusun jawaban..."):
                     jawaban = tanya_gemini(pertanyaan)
 
                 if jawaban:
-                    st.markdown("### Hasil dari Gemini")
-                    st.write(jawaban)
-                else:
-                    st.warning(
-                        "Gemini tidak mengembalikan jawaban. "
-                        "Silakan coba kembali."
+                    st.markdown(
+                        '<h3 style="color:#123B70;">'
+                        'Hasil dari Gemini</h3>',
+                        unsafe_allow_html=True
                     )
+                    st.markdown(
+                        f'<div style="color:#172033; background:#F1F5F9; '
+                        'padding:16px; border-radius:10px; '
+                        'font-size:16px;">'
+                        f'{jawaban}</div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.warning("Gemini tidak mengembalikan jawaban.")
 
             except Exception as e:
                 pesan_error = str(e)
@@ -201,15 +240,12 @@ elif page == "Divisi Robot AI":
                     )
                 elif "429" in pesan_error or "RESOURCE_EXHAUSTED" in pesan_error:
                     st.warning(
-                        "Kuota atau batas permintaan Gemini tercapai. "
-                        "Coba lagi nanti."
+                        "Kuota Gemini tercapai. Coba lagi nanti."
                     )
                 else:
                     st.error("Gemini gagal memberikan jawaban.")
-                    st.code(
-                        f"{type(e).__name__}: {pesan_error}"
-                    )
-
+                    st.code(f"{type(e).__name__}: {pesan_error}")
+                    
             except Exception as e:
                 st.error("Gemini gagal memberikan jawaban.")
                 st.code(f"{type(e).__name__}: {e}")
