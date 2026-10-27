@@ -164,8 +164,7 @@ if page == "Command Center":
     st.dataframe(pd.DataFrame(st.session_state.tasks), use_container_width=True, hide_index=True)
     st.info("Prototipe ini belum menjalankan robot secara mandiri. Modul saat ini adalah ruang kerja, pencatatan, dan simulasi alur. Integrasi nyata harus disambungkan dan diuji satu per satu.")
 
-
-elif page == "AI Sales Agent":
+elif page == "Divisi Robot AI":
     st.markdown("## 🤖 AI Sales Agent Arthama")
     st.caption(
         "Asisten AI untuk membantu penawaran dan penjualan Arthama Management."
