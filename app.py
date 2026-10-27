@@ -166,14 +166,19 @@ elif page == "Divisi Robot AI":
         )
     )
 
+    
     if st.button("✨ Tanya Gemini", type="primary"):
         if pertanyaan.strip():
             try:
                 with st.spinner("Gemini sedang menyusun jawaban..."):
                     jawaban = tanya_gemini(pertanyaan)
-
                 st.markdown("### Hasil dari Gemini")
                 st.write(jawaban)
+            except Exception as e:
+                st.error("Gemini gagal memberikan jawaban.")
+                st.code(f"{type(e).__name__}: {e}")
+        else:
+            st.warning("Masukkan pertanyaan terlebih dahulu.")
 
             
 except Exception as e:
