@@ -168,7 +168,8 @@ elif page == "Divisi Robot AI":
         placeholder=(
             "Contoh: Buatkan pesan WhatsApp penawaran "
             "paket gathering untuk perusahaan 100 peserta."
-        )
+        ),
+        key="pertanyaan_ai_arthama"
     )
 
     if st.button("✨ Tanya Gemini", type="primary"):
@@ -176,11 +177,38 @@ elif page == "Divisi Robot AI":
             st.warning("Masukkan pertanyaan terlebih dahulu.")
         else:
             try:
-                with st.spinner("Gemini sedang menyusun jawaban..."):
+                with st.spinner(
+                    "Gemini sedang menyusun jawaban..."
+                ):
                     jawaban = tanya_gemini(pertanyaan)
 
-                st.markdown("### Hasil dari Gemini")
-                st.write(jawaban)
+                if jawaban:
+                    st.markdown("### Hasil dari Gemini")
+                    st.write(jawaban)
+                else:
+                    st.warning(
+                        "Gemini tidak mengembalikan jawaban. "
+                        "Silakan coba kembali."
+                    )
+
+            except Exception as e:
+                pesan_error = str(e)
+
+                if "503" in pesan_error or "UNAVAILABLE" in pesan_error:
+                    st.warning(
+                        "Server Gemini sedang sibuk. "
+                        "Tunggu sebentar, lalu coba kembali."
+                    )
+                elif "429" in pesan_error or "RESOURCE_EXHAUSTED" in pesan_error:
+                    st.warning(
+                        "Kuota atau batas permintaan Gemini tercapai. "
+                        "Coba lagi nanti."
+                    )
+                else:
+                    st.error("Gemini gagal memberikan jawaban.")
+                    st.code(
+                        f"{type(e).__name__}: {pesan_error}"
+                    )
 
             except Exception as e:
                 st.error("Gemini gagal memberikan jawaban.")
