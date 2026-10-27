@@ -19,9 +19,6 @@ def tanya_gemini(pertanyaan):
 
     return response.text
 
-# Menghubungkan Gemini dengan API key dari Streamlit Secrets
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-
 def tanya_gemini(pertanyaan):
     model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(pertanyaan)
