@@ -4,7 +4,20 @@ from datetime import date, datetime
 
 import requests
 
-import google.generativeai as genai
+
+from google import genai
+
+def tanya_gemini(pertanyaan):
+    client = genai.Client(
+        api_key=st.secrets["GEMINI_API_KEY"]
+    )
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=pertanyaan
+    )
+
+    return response.text
 
 # Menghubungkan Gemini dengan API key dari Streamlit Secrets
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
