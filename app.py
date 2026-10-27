@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 import requests
 
+
 def arthama_api(action, data=None):
     url = st.secrets["ARTHAMA_WEBAPP_URL"]
     token = st.secrets["ARTHAMA_API_TOKEN"]
@@ -16,11 +17,12 @@ def arthama_api(action, data=None):
     if data is not None:
         payload["data"] = data
 
-        response = requests.post(
+    response = requests.post(
         url,
         json=payload,
         timeout=30,
     )
+
     response.raise_for_status()
 
     try:
@@ -29,7 +31,6 @@ def arthama_api(action, data=None):
         raise RuntimeError(
             f"Respons bukan JSON. "
             f"HTTP {response.status_code}; "
-            f"URL akhir: {response.url}; "
             f"Isi respons: {response.text[:300]}"
         )
 st.set_page_config(
