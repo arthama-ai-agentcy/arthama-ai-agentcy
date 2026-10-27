@@ -174,9 +174,7 @@ elif page == "Divisi Robot AI":
                     jawaban = tanya_gemini(pertanyaan)
                 st.markdown("### Hasil dari Gemini")
                 st.write(jawaban)
-            
-        else:
-            st.warning("Masukkan pertanyaan terlebih dahulu.")
+        
         else:
             st.warning("Masukkan pertanyaan terlebih dahulu.")
 
