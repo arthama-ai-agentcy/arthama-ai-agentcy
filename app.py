@@ -248,6 +248,23 @@ elif page == "Divisi Robot AI":
                     
             
         
+            except Exception as e:
+                pesan_error = str(e)
+
+                if "503" in pesan_error or "UNAVAILABLE" in pesan_error:
+                    st.warning(
+                        "Server Gemini sedang sibuk. "
+                        "Tunggu sebentar, lalu coba kembali."
+                    )
+                elif "429" in pesan_error or "RESOURCE_EXHAUSTED" in pesan_error:
+                    st.warning(
+                        "Kuota Gemini tercapai. Coba lagi nanti."
+                    )
+                else:
+                    st.error("Gemini gagal memberikan jawaban.")
+                    st.code(
+                        f"{type(e).__name__}: {pesan_error}"
+                    )
 
             
 
