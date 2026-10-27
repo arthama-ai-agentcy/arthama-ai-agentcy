@@ -152,13 +152,13 @@ if page == "Command Center":
     st.dataframe(pd.DataFrame(st.session_state.tasks), use_container_width=True, hide_index=True)
     st.info("Prototipe ini belum menjalankan robot secara mandiri. Modul saat ini adalah ruang kerja, pencatatan, dan simulasi alur. Integrasi nyata harus disambungkan dan diuji satu per satu.")
 
+
 elif page == "Divisi Robot AI":
     st.markdown("## 🤖 AI Sales Agent Arthama")
     st.caption(
         "Asisten AI untuk membantu penawaran dan penjualan Arthama Management."
     )
 
-    
     pertanyaan = st.text_area(
         "Apa yang ingin kamu kerjakan?",
         placeholder=(
@@ -168,7 +168,9 @@ elif page == "Divisi Robot AI":
     )
 
     if st.button("✨ Tanya Gemini", type="primary"):
-        if pertanyaan.strip():
+        if not pertanyaan.strip():
+            st.warning("Masukkan pertanyaan terlebih dahulu.")
+        else:
             try:
                 with st.spinner("Gemini sedang menyusun jawaban..."):
                     jawaban = tanya_gemini(pertanyaan)
@@ -179,16 +181,10 @@ elif page == "Divisi Robot AI":
             except Exception as e:
                 st.error("Gemini gagal memberikan jawaban.")
                 st.code(f"{type(e).__name__}: {e}")
-        else:
-            st.warning("Masukkan pertanyaan terlebih dahulu.")
         
 
             
-except Exception as e:
-    st.error("Gemini gagal memberikan jawaban.")
-    st.code(f"{type(e).__name__}: {e}")
-        else:
-            st.warning("Masukkan pertanyaan terlebih dahulu.")
+
 
 
 elif page == "Sales CRM":
