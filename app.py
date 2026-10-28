@@ -440,7 +440,6 @@ elif page == "Studio Konten":
             else:
                 st.error("Tema promosi harus diisi.")
 
-elif page == "Koneksi Akun":
     st.markdown("## 🔌 Koneksi Akun")
     st.warning("Keamanan: jangan masukkan kata sandi, kode OTP, token API, atau recovery code ke formulir ini. Prototipe ini belum membuat koneksi sungguhan.")
     details = {
