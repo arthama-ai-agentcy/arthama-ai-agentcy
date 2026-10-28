@@ -440,33 +440,122 @@ elif page == "Studio Konten":
             else:
                 st.error("Tema promosi harus diisi.")
 
+    
     st.markdown("## 🔌 Koneksi Akun")
-    st.warning("Keamanan: jangan masukkan kata sandi, kode OTP, token API, atau recovery code ke formulir ini. Prototipe ini belum membuat koneksi sungguhan.")
-    details = {
-        "Gmail":"Email pusat, draf penawaran, dan pengingat. Integrasi resmi/OAuth atau Apps Script diperlukan.",
-        "Instagram":"Publikasi dan insight memerlukan akun profesional, izin Meta, dan integrasi yang didukung.",
-        "Facebook Page":"Penjadwalan dan insight memerlukan akses Page dan koneksi platform yang sah.",
-        "TikTok":"Integrasi tergantung dukungan platform dan izin aplikasi yang tersedia.",
-        "Metricool":"Hubungkan lewat proses otorisasi resmi Metricool; jadwal harus dikonfirmasi di Metricool.",
-        "Google Sheets":"Bisa menjadi CRM utama; integrasi perlu Google Apps Script atau OAuth/API.",
-        "WhatsApp Business":"Gunakan aplikasi untuk balasan manual; otomatisasi outbound memerlukan platform/API resmi dan persetujuan penerima.",
-    }
-    for service, description in details.items():
-        with st.container(border=True):
-            left,right = st.columns([3,2])
-            with left:
-                st.markdown(f"### {service}")
-                st.caption(description)
-            with right:
-                current = st.session_state.connections.get(service, "Belum dihubungkan")
-                st.write(f"Status: **{current}**")
-                choice = st.selectbox("Status pencatatan", ["Belum dihubungkan","Direncanakan","Terhubung (manual)"], index=["Belum dihubungkan","Direncanakan","Terhubung (manual)"].index(current), key=f"conn_{service}")
-                if st.button(f"Simpan status {service}", key=f"save_{service}"):
-                    st.session_state.connections[service] = choice
-                    st.success("Status lokal diperbarui; ini bukan autentikasi ke layanan.")
-    st.markdown("### Urutan koneksi yang disarankan")
-    st.write("1. Email pusat → 2. Google Sheets CRM → 3. Meta/Instagram → 4. Metricool → 5. TikTok → 6. WhatsApp API bila diperlukan.")
 
+    st.info(
+        "Informasi akun resmi Arthama Management. "
+        "Status pencatatan tidak otomatis membuktikan akun sudah terhubung."
+    )
+
+    details = {
+        "Gmail": {
+            "description": "Email resmi untuk komunikasi pelanggan, penawaran, dan reservasi.",
+            "account": "arthamamanagement@gmail.com",
+            "url": "https://mail.google.com/",
+        },
+        "Instagram": {
+            "description": "Akun media sosial untuk promosi dan dokumentasi kegiatan.",
+            "account": "@arthamamanagement",
+            "url": "https://www.instagram.com/arthamamanagement/",
+        },
+        "Facebook Page": {
+            "description": "Halaman Facebook untuk promosi dan komunikasi pelanggan.",
+            "account": "arthamavillapuncak",
+            "url": "https://www.facebook.com/arthamavillapuncak",
+        },
+        "TikTok": {
+            "description": "Kanal video promosi dan dokumentasi kegiatan.",
+            "account": "@arthamamanagement",
+            "url": "https://www.tiktok.com/@arthamamanagement",
+        },
+        "Metricool": {
+            "description": "Pengelolaan dan penjadwalan konten media sosial.",
+            "account": "Belum diatur",
+            "url": "https://metricool.com/",
+        },
+        "Google Sheets": {
+            "description": "Database utama calon klien Arthama Management.",
+            "account": "Database CRM sudah digunakan",
+            "url": None,
+        },
+        "WhatsApp Business": {
+            "description": "Kontak komunikasi dan reservasi pelanggan.",
+            "account": "087868239249",
+            "url": "https://wa.me/6287868239249",
+        },
+    }
+
+    if "connections" not in st.session_state:
+        st.session_state.connections = {}
+
+    status_options = [
+        "Belum diperiksa",
+        "Direncanakan",
+        "Terhubung (manual)",
+    ]
+
+    for service, item in details.items():
+        with st.container(border=True):
+            st.markdown(f"### {service}")
+            st.caption(item["description"])
+            st.write(f"**Akun:** {item['account']}")
+
+            if item["url"]:
+                st.markdown(f"[Buka {service}]({item['url']})")
+
+            if service == "Google Sheets":
+                st.success(
+                    "Database CRM sudah digunakan. "
+                    "Bagian ini tidak mengubah koneksi Google Sheets."
+                )
+
+            current = st.session_state.connections.get(
+                service, "Belum diperiksa"
+            )
+
+            if current not in status_options:
+                current = "Belum diperiksa"
+
+            choice = st.selectbox(
+                "Status pencatatan",
+                status_options,
+                index=status_options.index(current),
+                key=f"conn_{service}",
+            )
+
+            if st.button(
+                f"Simpan status {service}",
+                key=f"save_{service}",
+            ):
+                st.session_state.connections[service] = choice
+                st.success(
+                    "Status pencatatan diperbarui. "
+                    "Koneksi belum diverifikasi secara otomatis."
+                )
+
+    st.markdown("### 📋 Tahapan Integrasi")
+
+    st.write(
+        "1. Google Sheets — pertahankan database CRM yang sudah berjalan."
+    )
+    st.write(
+        "2. Gmail — siapkan integrasi untuk email penawaran dan pengingat."
+    )
+    st.write(
+        "3. Instagram dan Facebook — evaluasi integrasi resmi Meta."
+    )
+    st.write(
+        "4. TikTok dan Metricool — periksa dukungan integrasi yang tersedia."
+    )
+    st.write(
+        "5. WhatsApp Business — evaluasi integrasi resmi jika otomatisasi diperlukan."
+    )
+
+    st.caption(
+        "Catatan: status saat ini tersimpan di session state Streamlit "
+        "dan belum menjadi penyimpanan permanen."
+    )
 elif page == "Pengaturan & Keamanan":
     st.markdown("## 🛡️ Pengaturan & Keamanan")
     st.markdown("""
