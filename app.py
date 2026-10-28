@@ -1,235 +1,409 @@
 
-import streamlit as st
-import pandas as pd
-from datetime import date
+import os
+import io
+import csv
+import json
+import time
 import requests
-from google import genai
+import streamlit as st
+from datetime import datetime
 
+# ============================================================
+# ARTHAMA AI AGENCY
+# Aplikasi bisnis: AI Assistant, Sales CRM, Studio Konten
+# ============================================================
 
-# ---------- KONFIGURASI HALAMAN ----------
 st.set_page_config(
-    page_title="Arthama Management — AI Agency",
+    page_title="Arthama AI Agency",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+APP_NAME = "ARTHAMA AI AGENCY"
+APP_VERSION = "2.0.0"
 
-# ---------- KONEKSI GEMINI ----------
+# ------------------------------------------------------------
+# 1. DESAIN DAN TEMA
+# ------------------------------------------------------------
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    .stApp {
+        background: #f4f7fb;
+        color: #172033;
+    }
+
+    [data-testid="stSidebar"] {
+        background: #101d36;
+    }
+
+    [data-testid="stSidebar"] * {
+        color: #f4f7fb;
+    }
+
+    [data-testid="stSidebar"] .stRadio label {
+        font-size: 15px;
+        font-weight: 500;
+    }
+
+    h1, h2, h3 {
+        color: #14284b;
+        letter-spacing: -0.4px;
+    }
+
+    p, li, label, .stMarkdown {
+        line-height: 1.65;
+    }
+
+    .hero {
+        padding: 28px;
+        border-radius: 20px;
+        background: linear-gradient(120deg, #11274b, #174d86);
+        color: white;
+        margin-bottom: 22px;
+    }
+
+    .hero h1 {
+        color: white;
+        font-size: 30px;
+        margin-bottom: 8px;
+    }
+
+    .hero p {
+        color: #e3edff;
+        font-size: 15px;
+        margin-bottom: 0;
+    }
+
+    .section-card {
+        padding: 20px;
+        border-radius: 16px;
+        background: white;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 16px;
+    }
+
+    .small-muted {
+        color: #65748b;
+        font-size: 13px;
+    }
+
+    .status-pill {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 20px;
+        background: #e8f2ff;
+        color: #174d86;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    div[data-testid="stMetric"] {
+        background: white;
+        padding: 17px;
+        border: 1px solid #e2e8f0;
+        border-radius: 15px;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        color: #65748b;
+    }
+
+    .stButton button {
+        border-radius: 10px;
+        font-weight: 600;
+        min-height: 42px;
+    }
+
+    .stTextInput input,
+    .stTextArea textarea,
+    .stSelectbox div[data-baseweb="select"] {
+        border-radius: 10px;
+    }
+
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+    }
+
+    footer {
+        visibility: hidden;
+    }
+
+    @media (max-width: 768px) {
+        .hero {
+            padding: 20px;
+        }
+        .hero h1 {
+            font-size: 24px;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ------------------------------------------------------------
+# 2. KONFIGURASI RAHASIA
+# ------------------------------------------------------------
+
+def secret_value(name, default=""):
+    """Membaca Streamlit Secrets dengan aman."""
+    try:
+        value = st.secrets.get(name, default)
+        return str(value).strip() if value is not None else default
+    except Exception:
+        return os.getenv(name, default).strip()
+
+
+# ------------------------------------------------------------
+# 3. STATE APLIKASI
+# ------------------------------------------------------------
+
+if "ai_history" not in st.session_state:
+    st.session_state.ai_history = []
+
+if "content_result" not in st.session_state:
+    st.session_state.content_result = ""
+
+if "crm_last_result" not in st.session_state:
+    st.session_state.crm_last_result = None
+
+if "connection_test_result" not in st.session_state:
+    st.session_state.connection_test_result = None
+
+
+# ------------------------------------------------------------
+# 4. GEMINI AI
+# ------------------------------------------------------------
+
+SYSTEM_INSTRUCTION = """
+Kamu adalah Arthama AI, asisten bisnis profesional Arthama Management
+di Indonesia.
+
+Tugas:
+- Membantu strategi pemasaran dan penjualan.
+- Membuat penawaran paket wisata, outbound, gathering, meeting dan event.
+- Menyusun proposal, rundown, caption, naskah iklan dan ide konten.
+- Membantu layanan pelanggan dan pengembangan bisnis.
+- Membantu perencanaan anggaran jika data biaya tersedia.
+
+Aturan:
+- Jawab dalam bahasa Indonesia yang jelas, profesional, dan praktis.
+- Gunakan judul, poin, tabel teks, dan langkah kerja bila sesuai.
+- Jangan mengarang hasil pencarian, data aktual, harga vendor,
+  transaksi, atau tindakan yang belum dilakukan.
+- Bedakan angka yang diberikan pengguna dari estimasi.
+- Jika data belum lengkap, jelaskan asumsi secara terbuka.
+- Untuk perhitungan, tampilkan rumus dan hasilnya.
+"""
+
 def tanya_gemini(pertanyaan):
+    """Mengirim pertanyaan ke Gemini dan mengembalikan teks jawaban."""
+    if not isinstance(pertanyaan, str) or not pertanyaan.strip():
+        raise ValueError("Pertanyaan tidak boleh kosong.")
+
+    api_key = secret_value("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GEMINI_API_KEY belum tersedia. Periksa Streamlit Secrets."
+        )
+
+    # Model dapat diubah melalui Streamlit Secrets: GEMINI_MODEL
+    model = secret_value("GEMINI_MODEL", "gemini-2.5-flash")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError(
+            "Library google-genai belum terpasang. "
+            "Periksa requirements.txt lalu restart aplikasi."
+        ) from exc
+
     client = genai.Client(
-        api_key=st.secrets["GEMINI_API_KEY"]
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=60000),
     )
+
     response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=pertanyaan,
+        model=model,
+        contents=pertanyaan.strip(),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_INSTRUCTION,
+            temperature=0.7,
+            max_output_tokens=4096,
+        ),
     )
-    return response.text
+
+    jawaban = getattr(response, "text", None)
+    if not jawaban or not jawaban.strip():
+        raise RuntimeError(
+            "Gemini tidak memberikan teks jawaban. Coba pertanyaan lain."
+        )
+
+    return jawaban.strip()
 
 
-# ---------- KONEKSI GOOGLE SHEETS ----------
+def tampilkan_error_ai(error):
+    """Menampilkan petunjuk yang lebih berguna untuk error Gemini."""
+    pesan = str(error)
+    lower = pesan.lower()
+
+    if any(x in lower for x in ["429", "quota", "resource_exhausted"]):
+        st.error("Kuota atau batas permintaan Gemini sedang tercapai.")
+        st.markdown(
+            """
+            **Yang bisa dilakukan:**
+            1. Periksa penggunaan dan kuota di Google AI Studio.
+            2. Tunggu sampai batas permintaan diperbarui.
+            3. Periksa apakah model yang digunakan memiliki kuota.
+            4. Jangan mengirim pertanyaan berulang kali dalam waktu singkat.
+            """
+        )
+    elif any(x in lower for x in ["503", "unavailable", "overloaded"]):
+        st.error("Layanan Gemini sedang tidak tersedia atau sibuk.")
+        st.info("Coba kembali beberapa saat lagi.")
+    elif any(x in lower for x in ["401", "403", "api key", "permission"]):
+        st.error("Kunci API atau izin akses Gemini bermasalah.")
+        st.info(
+            "Periksa GEMINI_API_KEY di Streamlit Secrets. "
+            "Jangan membagikan kunci API di chat atau kode publik."
+        )
+    elif any(x in lower for x in ["404", "not found"]):
+        st.error("Model Gemini tidak ditemukan atau tidak tersedia.")
+        st.info(
+            "Periksa nama model yang benar di Google AI Studio, "
+            "lalu atur nilai GEMINI_MODEL di Streamlit Secrets."
+        )
+    elif any(x in lower for x in ["timeout", "timed out"]):
+        st.error("Permintaan AI melewati batas waktu.")
+        st.info("Coba pertanyaan yang lebih singkat atau ulangi nanti.")
+    else:
+        st.error("Terjadi kesalahan saat menghubungi layanan AI.")
+        with st.expander("Detail teknis"):
+            st.code(pesan[:1500])
+
+
+# ------------------------------------------------------------
+# 5. KONEKTOR GOOGLE SHEETS / CRM
+# ------------------------------------------------------------
+
 def arthama_api(action, data=None):
-    url = st.secrets["ARTHAMA_WEBAPP_URL"]
-    token = st.secrets["ARTHAMA_API_TOKEN"]
+    """
+    Menghubungkan aplikasi ke Apps Script yang sudah digunakan.
+    Mempertahankan format action/token/data.
+    """
+    url = secret_value("ARTHAMA_WEBAPP_URL")
+    token = secret_value("ARTHAMA_API_TOKEN")
+
+    if not url:
+        raise RuntimeError(
+            "ARTHAMA_WEBAPP_URL belum tersedia di Streamlit Secrets."
+        )
+    if not token:
+        raise RuntimeError(
+            "ARTHAMA_API_TOKEN belum tersedia di Streamlit Secrets."
+        )
 
     payload = {
         "action": action,
         "token": token,
     }
-
     if data is not None:
         payload["data"] = data
 
-    response = requests.post(
-        url,
-        json=payload,
-        timeout=30,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(url, json=payload, timeout=30)
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise RuntimeError(
+            "Koneksi CRM timeout. Silakan coba kembali."
+        ) from exc
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Koneksi CRM gagal: {exc}"
+        ) from exc
 
     try:
-        return response.json()
-    except ValueError:
+        result = response.json()
+    except ValueError as exc:
         raise RuntimeError(
-            f"Respons bukan JSON. HTTP {response.status_code}; "
-            f"Isi respons: {response.text[:300]}"
+            "Respons CRM bukan JSON. Isi respons: "
+            + response.text[:300]
+        ) from exc
+
+    if isinstance(result, dict):
+        if result.get("status") == "error" or result.get("success") is False:
+            raise RuntimeError(
+                str(result.get("message", "CRM mengembalikan error."))
+            )
+
+    return result
+
+
+def ekstrak_data_crm(result):
+    """Mencoba membaca beberapa format respons Apps Script."""
+    if isinstance(result, list):
+        return result
+
+    if isinstance(result, dict):
+        for key in ("data", "rows", "records", "clients", "result"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+
+    return []
+
+
+def tampilkan_data_crm(data):
+    """Menampilkan data CRM dalam tabel Streamlit."""
+    import pandas as pd
+
+    if not data:
+        st.info(
+            "Belum ada data yang bisa ditampilkan, atau format respons "
+            "belum dikenali. Periksa respons konektor sebelum mengubah "
+            "struktur database."
         )
+        return
+
+    try:
+        df = pd.DataFrame(data)
+        if df.empty:
+            st.info("Data CRM masih kosong.")
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Unduh data CRM CSV",
+                data=df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="arthama_crm_export.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    except Exception as exc:
+        st.warning("Data diterima, tetapi gagal ditampilkan sebagai tabel.")
+        st.code(str(exc))
 
 
-# ---------- TEMA ----------
-st.markdown("""
-<style>
-:root {
-    --navy: #081426;
-    --blue: #2478ff;
-    --cyan: #44d7e8;
-}
-.stApp {
-    background: linear-gradient(
-        135deg, #071323 0%, #0b1e37 48%, #101d35 100%
-    );
-    color: #eef5ff;
-}
-[data-testid="stSidebar"] {
-    background: #091629;
-    border-right: 1px solid #203755;
-}
-h1, h2, h3 {
-    color: #f3f8ff !important;
-}
-p, label, .stMarkdown {
-    color: #d4e1f5;
-}
-div[data-testid="stMetric"] {
-    background: rgba(20,43,72,.78);
-    padding: 16px;
-    border: 1px solid #254567;
-    border-radius: 16px;
-}
-div[data-testid="stMetricValue"] {
-    color: #ffffff;
-}
-div.stButton > button {
-    border-radius: 10px;
-    border: 1px solid #3c8bff;
-    background: linear-gradient(90deg,#1d63dc,#168eae);
-    color: white;
-    font-weight: 600;
-}
-.panel {
-    background: rgba(17,37,64,.86);
-    border: 1px solid #254567;
-    border-radius: 18px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
-}
-.small {
-    color: #a9bdd8;
-    font-size: .88rem;
-}
-.pill {
-    display: inline-block;
-    border: 1px solid #2f668f;
-    color: #9cecf4;
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: .78rem;
-    margin-right: 5px;
-}
-.robot {
-    font-size: 2rem;
-}
-hr {
-    border-color: #25405e;
-}
-</style>
-""", unsafe_allow_html=True)
+# ------------------------------------------------------------
+# 6. SIDEBAR / NAVIGASI
+# ------------------------------------------------------------
 
-
-# ---------- DATA DEMO ----------
-if "leads" not in st.session_state:
-    st.session_state.leads = pd.DataFrame([
-        {
-            "Perusahaan": "PT Guhring Indonesia",
-            "Kota": "Bekasi",
-            "Potensi": "Corporate outing / team building",
-            "Status": "Email terkirim",
-            "Follow-up": "2026-10-30",
-            "Estimasi (Rp)": 25000000,
-        },
-        {
-            "Perusahaan": "PT Tigaraksa Satria Tbk",
-            "Kota": "Jakarta",
-            "Potensi": "Family gathering",
-            "Status": "Prospek baru",
-            "Follow-up": "2026-10-29",
-            "Estimasi (Rp)": 40000000,
-        },
-        {
-            "Perusahaan": "Cargill Indonesia",
-            "Kota": "Jakarta",
-            "Potensi": "Meeting & team building",
-            "Status": "Riset awal",
-            "Follow-up": "2026-11-02",
-            "Estimasi (Rp)": 30000000,
-        },
-        {
-            "Perusahaan": "PT Summarecon Agung Tbk",
-            "Kota": "Bekasi",
-            "Potensi": "Employee gathering",
-            "Status": "Prospek baru",
-            "Follow-up": "2026-11-03",
-            "Estimasi (Rp)": 50000000,
-        },
-        {
-            "Perusahaan": "PT Misuba Guna Indonesia",
-            "Kota": "Bogor",
-            "Potensi": "Outbound",
-            "Status": "Riset awal",
-            "Follow-up": "2026-11-04",
-            "Estimasi (Rp)": 20000000,
-        },
-    ])
-
-if "content" not in st.session_state:
-    st.session_state.content = pd.DataFrame([
-        {
-            "Tanggal": "2026-10-27",
-            "Kanal": "Instagram + Facebook",
-            "Konten": "Promo Inflatable Games Team Building",
-            "Status": "Draft / perlu konfirmasi",
-        },
-        {
-            "Tanggal": "2026-10-29",
-            "Kanal": "Instagram",
-            "Konten": "Paket Lembang Bandung 2D1N",
-            "Status": "Rencana",
-        },
-        {
-            "Tanggal": "2026-10-31",
-            "Kanal": "Facebook",
-            "Konten": "Promo villa weekday satu jutaan",
-            "Status": "Rencana",
-        },
-    ])
-
-if "connections" not in st.session_state:
-    st.session_state.connections = {}
-
-if "tasks" not in st.session_state:
-    st.session_state.tasks = [
-        {
-            "Tugas": "Cek respons penawaran PT Guhring Indonesia",
-            "Divisi": "AI Sales",
-            "Prioritas": "Tinggi",
-            "Status": "Menunggu tindakan manusia",
-        },
-        {
-            "Tugas": "Siapkan caption paket Lembang",
-            "Divisi": "AI Marketing",
-            "Prioritas": "Sedang",
-            "Status": "Siap dikerjakan",
-        },
-        {
-            "Tugas": "Lengkapi kontak publik prospek",
-            "Divisi": "AI Research",
-            "Prioritas": "Sedang",
-            "Status": "Perlu riset",
-        },
-    ]
-
-
-# ---------- SIDEBAR / NAVIGASI ----------
 with st.sidebar:
-    st.markdown("## 🤖 ARTHAMA")
-    st.markdown(
-        "<span class='small'>MANAGEMENT · AI AGENCY</span>",
-        unsafe_allow_html=True,
-    )
-    st.markdown("---")
+    st.markdown("# 🤖 ARTHAMA")
+    st.caption("AI Agency & Business Management")
+    st.divider()
 
     page = st.radio(
-        "RUANG KERJA",
+        "MENU UTAMA",
         [
             "Command Center",
             "Divisi Robot AI",
@@ -238,524 +412,607 @@ with st.sidebar:
             "Koneksi Akun",
             "Pengaturan & Keamanan",
         ],
+        key="main_navigation",
     )
 
-    st.markdown("---")
+    st.divider()
+    st.caption(f"Versi aplikasi {APP_VERSION}")
+    st.caption("Arthama Management")
+    st.caption("Sistem kerja internal")
+
+
+# ------------------------------------------------------------
+# 7. HEADER HALAMAN
+# ------------------------------------------------------------
+
+def header(judul, deskripsi):
     st.markdown(
-        "<span class='pill'>PROTOTIPE</span> "
-        "<span class='pill'>MODE AMAN</span>",
+        f"""
+        <div class="hero">
+            <h1>{judul}</h1>
+            <p>{deskripsi}</p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
-    st.caption(
-        "Integrasi eksternal hanya aktif jika telah disiapkan "
-        "dan diuji secara resmi."
-    )
-
-    if st.button("🔌 Tes Koneksi Google Sheets"):
-        try:
-            hasil_tes = arthama_api("list")
-            st.success("Permintaan berhasil dijalankan.")
-            st.json(hasil_tes)
-        except Exception:
-            st.error(
-                "Tes gagal. Periksa konfigurasi dan koneksi."
-            )
 
 
-# ---------- HEADER ----------
-st.markdown("# ARTHAMA MANAGEMENT — AI AGENCY")
-st.markdown(
-    "**Kantor virtual untuk pemasaran, penjualan, dan operasional bisnis.**"
-)
-st.markdown(
-    "<span class='pill'>BLUE FUTURE OFFICE</span>"
-    "<span class='pill'>HUMAN APPROVAL</span>"
-    "<span class='pill'>LOW-COST FIRST</span>",
-    unsafe_allow_html=True,
-)
+# ------------------------------------------------------------
+# 8. COMMAND CENTER
+# ------------------------------------------------------------
 
-
-# ==================================================
-# 1. COMMAND CENTER
-# ==================================================
 if page == "Command Center":
-    st.markdown("## 🛰️ Command Center")
+    header(
+        "Command Center",
+        "Pusat kendali operasional dan produktivitas Arthama Management.",
+    )
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Modul Aplikasi", "6")
+    with col2:
+        st.metric("Asisten AI", "Gemini")
+    with col3:
+        st.metric("Database CRM", "Google Sheets")
+
+    st.subheader("Selamat datang di Arthama AI Agency")
+    st.write(
+        "Gunakan dashboard ini untuk membantu pekerjaan pemasaran, "
+        "menyusun konten, mengelola calon klien, dan merencanakan event."
+    )
+
+    a, b = st.columns(2)
+    with a:
+        st.markdown(
+            """
+            <div class="section-card">
+                <h3>🤖 Divisi Robot AI</h3>
+                <p>
+                Asisten untuk ide bisnis, strategi pemasaran, penawaran,
+                rundown acara, dan analisis berdasarkan data yang diberikan.
+                </p>
+                </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Buka Divisi Robot AI", use_container_width=True):
+            st.session_state.main_navigation = "Divisi Robot AI"
+            st.rerun()
+
+    with b:
+        st.markdown(
+            """
+            <div class="section-card">
+                <h3>📊 Sales CRM</h3>
+                <p>
+                Melihat data calon klien dan menambahkan prospek baru
+                melalui konektor Google Sheets yang telah dikonfigurasi.
+                </p>
+                </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Buka Sales CRM", use_container_width=True):
+            st.session_state.main_navigation = "Sales CRM"
+            st.rerun()
+
+    st.subheader("Alur kerja yang disarankan")
     st.markdown(
-        "<div class='panel'><b>Selamat datang di kantor virtual Arthama.</b>"
-        "<br><span class='small'>Pantau prospek, konten, tugas, dan "
-        "kesiapan koneksi. Angka demo bukan aktivitas live.</span></div>",
-        unsafe_allow_html=True,
-    )
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Prospek demo", len(st.session_state.leads))
-    c2.metric("Konten terencana", len(st.session_state.content))
-    c3.metric("Tugas terbuka", len(st.session_state.tasks))
-    c4.metric(
-        "Status tercatat terhubung",
-        sum(
-            v == "Terhubung (manual)"
-            for v in st.session_state.connections.values()
-        ),
-    )
-
-    st.markdown("### 🏢 Denah divisi")
-    rooms = [
-        ("🧭", "AI Director", "Prioritas dan pembagian tugas."),
-        ("📣", "AI Marketing", "Caption dan konsep promosi."),
-        ("🎯", "AI Sales", "Prospek dan tahapan penjualan."),
-        ("🔎", "AI Research", "Riset informasi bisnis publik."),
-        ("💬", "AI Customer Care", "Persiapan balasan pelanggan."),
-        ("📊", "AI Analyst", "Analisis data yang tersedia."),
-    ]
-
-    cols = st.columns(3)
-    for i, (emoji, title, desc) in enumerate(rooms):
-        with cols[i % 3]:
-            st.markdown(
-                f"<div class='panel'><div class='robot'>{emoji}</div>"
-                f"<h3>{title}</h3><span class='small'>{desc}</span></div>",
-                unsafe_allow_html=True,
-            )
-
-    st.markdown("### 📌 Daftar tugas")
-    st.dataframe(
-        pd.DataFrame(st.session_state.tasks),
-        use_container_width=True,
-        hide_index=True,
+        """
+        1. Gunakan **Divisi Robot AI** untuk membuat strategi atau draft.
+        2. Gunakan **Studio Konten** untuk menyusun materi pemasaran.
+        3. Catat prospek melalui **Sales CRM**.
+        4. Periksa **Koneksi Akun** jika layanan tidak tersambung.
+        """
     )
 
 
-# ==================================================
-# 2. DIVISI ROBOT AI
-# ==================================================
+# ------------------------------------------------------------
+# 9. DIVISI ROBOT AI
+# ------------------------------------------------------------
+
 elif page == "Divisi Robot AI":
-    st.markdown("## 🤖 AI Sales Agent Arthama")
-    st.caption(
-        "Asisten AI untuk membantu penawaran dan penjualan Arthama Management."
+    header(
+        "Divisi Robot AI",
+        "Asisten kerja untuk pemasaran, penjualan, event, dan pengembangan bisnis.",
     )
+
+    st.info(
+        "Jawaban AI adalah bantuan otomatis. Periksa kembali harga, "
+        "perhitungan, jadwal, dan informasi penting sebelum dikirim "
+        "kepada klien."
+    )
+
+    contoh = st.selectbox(
+        "Pilih contoh kebutuhan (opsional)",
+        [
+            "Tulis pertanyaan sendiri",
+            "Buat penawaran outbound perusahaan",
+            "Susun rundown gathering 2 hari 1 malam",
+            "Buat strategi pemasaran villa weekday",
+            "Buat follow-up WhatsApp untuk calon klien",
+            "Analisis harga dan estimasi keuntungan paket wisata",
+        ],
+    )
+
+    contoh_prompt = {
+        "Buat penawaran outbound perusahaan":
+            "Bantu buat penawaran outbound perusahaan. Tanyakan data "
+            "yang masih kurang sebelum menentukan harga.",
+        "Susun rundown gathering 2 hari 1 malam":
+            "Susun contoh rundown gathering 2 hari 1 malam yang profesional. "
+            "Tandai bagian yang perlu disesuaikan dengan lokasi dan waktu.",
+        "Buat strategi pemasaran villa weekday":
+            "Buat strategi pemasaran villa weekday dengan anggaran terbatas, "
+            "CTA yang jelas, dan langkah yang bisa dikerjakan dari HP.",
+        "Buat follow-up WhatsApp untuk calon klien":
+            "Buat pesan follow-up WhatsApp yang sopan, profesional, "
+            "tidak memaksa, dan mengajak calon klien memberikan kepastian.",
+        "Analisis harga dan estimasi keuntungan paket wisata":
+            "Bantu menghitung harga jual dan keuntungan paket wisata. "
+            "Minta rincian biaya, jumlah peserta, dan komponen paket "
+            "jika datanya belum diberikan.",
+    }
+
+    if contoh != "Tulis pertanyaan sendiri":
+        st.caption("Contoh kebutuhan:")
+        st.write(contoh_prompt[contoh])
 
     pertanyaan = st.text_area(
         "Apa yang ingin kamu kerjakan?",
         placeholder=(
-            "Contoh: Buat pesan WhatsApp penawaran "
-            "gathering untuk perusahaan 100 peserta."
+            "Contoh: Buatkan strategi mendapatkan 10 calon klien gathering "
+            "perusahaan dalam 30 hari dengan anggaran terbatas."
         ),
-        key="pertanyaan_ai_arthama",
+        height=150,
+        key="ai_question",
     )
 
-    if st.button("✨ Tanya Gemini", type="primary"):
-        if not pertanyaan.strip():
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        jalankan = st.button(
+            "✨ Proses dengan AI",
+            type="primary",
+            use_container_width=True,
+        )
+    with col2:
+        if st.button("Hapus riwayat", use_container_width=True):
+            st.session_state.ai_history = []
+            st.rerun()
+
+    if jalankan:
+        prompt_final = pertanyaan.strip()
+
+        if not prompt_final and contoh != "Tulis pertanyaan sendiri":
+            prompt_final = contoh_prompt[contoh]
+
+        if not prompt_final:
             st.warning("Masukkan pertanyaan terlebih dahulu.")
         else:
-            try:
-                with st.spinner("Gemini sedang menyusun jawaban..."):
-                    jawaban = tanya_gemini(pertanyaan)
-
-                if jawaban:
-                    st.markdown("### Hasil dari Gemini")
-                    st.write(jawaban)
-                else:
-                    st.warning("Gemini tidak mengembalikan jawaban.")
-
-            except Exception as e:
-                pesan_error = str(e)
-
-                if "503" in pesan_error or "UNAVAILABLE" in pesan_error:
-                    st.warning(
-                        "Server Gemini sedang sibuk. Coba lagi nanti."
+            with st.spinner("AI sedang menyusun jawaban..."):
+                try:
+                    jawaban = tanya_gemini(prompt_final)
+                    st.session_state.ai_history.append(
+                        {
+                            "waktu": datetime.now().strftime("%d-%m-%Y %H:%M"),
+                            "pertanyaan": prompt_final,
+                            "jawaban": jawaban,
+                        }
                     )
-                elif "429" in pesan_error or "RESOURCE_EXHAUSTED" in pesan_error:
-                    st.warning(
-                        "Kuota Gemini tercapai. Tunggu hingga kuota tersedia."
-                    )
-                else:
-                    st.error("Gemini gagal memberikan jawaban.")
-                    st.code(
-                        f"{type(e).__name__}: {pesan_error}"
-                    )
+                    st.session_state.ai_last_answer = jawaban
+                    st.success("Jawaban berhasil dibuat.")
+                except Exception as exc:
+                    tampilkan_error_ai(exc)
+
+    if st.session_state.get("ai_last_answer"):
+        st.subheader("Hasil jawaban AI")
+        st.markdown(st.session_state.ai_last_answer)
+        st.download_button(
+            "Unduh jawaban sebagai TXT",
+            data=st.session_state.ai_last_answer.encode("utf-8"),
+            file_name="arthama_jawaban_ai.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+
+    if st.session_state.ai_history:
+        with st.expander("Riwayat pertanyaan sesi ini"):
+            for i, item in enumerate(
+                reversed(st.session_state.ai_history), start=1
+            ):
+                st.markdown(f"**{i}. {item['waktu']}**")
+                st.write(item["pertanyaan"])
+                with st.expander("Lihat jawaban"):
+                    st.markdown(item["jawaban"])
 
 
-# ==================================================
-# 3. SALES CRM — GOOGLE SHEETS
-# ==================================================
+# ------------------------------------------------------------
+# 10. SALES CRM
+# ------------------------------------------------------------
+
 elif page == "Sales CRM":
-    st.markdown("## 🎯 Sales CRM — Database Prospek")
-    st.caption(
-        "Data dibaca dan ditambahkan melalui konektor Google Sheets "
-        "yang sudah disiapkan."
+    header(
+        "Sales CRM",
+        "Kelola calon klien melalui konektor Google Sheets yang sudah ada.",
     )
 
-    try:
-        hasil = arthama_api("list")
+    st.warning(
+        "Modul ini menggunakan action `list` dan `add` pada Apps Script "
+        "yang telah dikonfigurasi. Kolom baru tidak ditambahkan ke database "
+        "secara otomatis."
+    )
 
-        if not hasil.get("success"):
-            st.error("Database belum berhasil dibaca.")
-            st.json(hasil)
-        else:
-            rows = hasil.get("rows", [])
+    tab1, tab2 = st.tabs(["📋 Data Calon Klien", "➕ Tambah Calon Klien"])
 
-            if rows:
-                headers = [str(h).strip() for h in rows[0]]
-                data_rows = rows[1:]
-                jumlah_kolom = len(headers)
-                data_bersih = []
+    with tab1:
+        st.subheader("Data CRM")
+        if st.button("Muat / segarkan data CRM", type="primary"):
+            with st.spinner("Mengambil data dari Google Sheets..."):
+                try:
+                    result = arthama_api("list")
+                    st.session_state.crm_last_result = result
+                    st.success("Respons CRM berhasil diterima.")
+                except Exception as exc:
+                    st.error(f"Gagal mengambil data CRM: {exc}")
 
-                for row_data in data_rows:
-                    row_data = list(row_data)
-                    row_data += [""] * max(
-                        0, jumlah_kolom - len(row_data)
-                    )
-                    data_bersih.append(row_data[:jumlah_kolom])
+        result = st.session_state.crm_last_result
+        if result is not None:
+            with st.expander("Lihat respons asli konektor"):
+                st.json(result)
+            data = ekstrak_data_crm(result)
+            tampilkan_data_crm(data)
 
-                df = pd.DataFrame(
-                    data_bersih,
-                    columns=headers,
-                )
+    with tab2:
+        st.subheader("Tambah prospek baru")
 
-                st.success(
-                    f"Koneksi berhasil. Data terbaca: {len(df)} baris."
-                )
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                st.download_button(
-                    "⬇️ Unduh database CSV",
-                    df.to_csv(index=False).encode("utf-8-sig"),
-                    "arthama_database_prospek.csv",
-                    "text/csv",
-                )
+        with st.form("crm_add_form", clear_on_submit=False):
+            nama = st.text_input("Nama calon klien *")
+            perusahaan = st.text_input("Perusahaan / instansi")
+            telepon = st.text_input("Nomor WhatsApp")
+            email = st.text_input("Email")
+            kebutuhan = st.text_area(
+                "Kebutuhan acara / produk",
+                placeholder="Contoh: gathering perusahaan, outbound, villa...",
+            )
+            tanggal = st.text_input(
+                "Tanggal acara",
+                placeholder="Contoh: 20-12-2026 atau belum ditentukan",
+            )
+            peserta = st.text_input(
+                "Jumlah peserta",
+                placeholder="Contoh: 100 orang",
+            )
+            budget = st.text_input(
+                "Estimasi anggaran",
+                placeholder="Contoh: Rp500.000/orang",
+            )
+            catatan = st.text_area("Catatan tambahan")
+            submit = st.form_submit_button(
+                "Simpan ke CRM",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if submit:
+            if not nama.strip():
+                st.error("Nama calon klien wajib diisi.")
             else:
-                st.warning("Google Sheets belum berisi data.")
-
-    except Exception as e:
-        st.error("Gagal mengambil database Google Sheets.")
-        st.code(str(e))
-
-    st.divider()
-    st.markdown("### ➕ Tambah prospek baru")
-
-    with st.form("add_lead_permanent"):
-        nama = st.text_input("Nama klien")
-        whatsapp = st.text_input("Nomor WhatsApp")
-        perusahaan = st.text_input("Nama perusahaan")
-        kebutuhan = st.text_input("Kebutuhan acara")
-        tanggal_acara = st.date_input(
-            "Tanggal acara",
-            value=date.today(),
-        )
-        jumlah = st.number_input(
-            "Jumlah peserta",
-            min_value=0,
-            step=1,
-        )
-        budget = st.text_input("Budget (contoh: Rp15.000.000)")
-        status = st.selectbox(
-            "Status prospek",
-            [
-                "Prospek baru",
-                "Riset awal",
-                "Sudah dihubungi",
-                "Menunggu respons",
-                "Tertarik",
-                "Survei",
-                "DP masuk",
-                "Tidak lanjut",
-            ],
-        )
-        tindak_lanjut = st.text_input("Tindak lanjut berikutnya")
-        catatan = st.text_area("Catatan")
-
-        submitted = st.form_submit_button("💾 Simpan ke Google Sheets")
-
-        if submitted:
-            if not nama.strip() and not perusahaan.strip():
-                st.error(
-                    "Isi minimal nama klien atau nama perusahaan."
-                )
-            else:
-                data_prospek = {
-                    "tanggalMasuk": str(date.today()),
-                    "namaKlien": nama.strip(),
-                    "whatsapp": whatsapp.strip(),
+                # Format data ini mengikuti pola connector yang sudah ada.
+                # Pastikan Apps Script menerima nama field berikut.
+                payload = {
+                    "nama": nama.strip(),
                     "perusahaan": perusahaan.strip(),
-                    "kebutuhanAcara": kebutuhan.strip(),
-                    "tanggalAcara": str(tanggal_acara),
-                    "jumlahPeserta": int(jumlah),
+                    "telepon": telepon.strip(),
+                    "email": email.strip(),
+                    "kebutuhan": kebutuhan.strip(),
+                    "tanggal_acara": tanggal.strip(),
+                    "jumlah_peserta": peserta.strip(),
                     "budget": budget.strip(),
-                    "statusProspek": status,
-                    "tindakLanjut": tindak_lanjut.strip(),
                     "catatan": catatan.strip(),
+                    "sumber": "Arthama AI Agency",
+                    "waktu_input": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
 
                 try:
-                    hasil_simpan = arthama_api(
-                        "add",
-                        data_prospek,
+                    with st.spinner("Mengirim data ke CRM..."):
+                        result = arthama_api("add", payload)
+                    st.success("Permintaan tambah data dikirim ke konektor.")
+                    st.json(result)
+                    st.caption(
+                        "Pastikan respons konektor menyatakan berhasil, "
+                        "lalu segarkan data CRM untuk memverifikasi baris baru."
                     )
-
-                    if hasil_simpan.get("success"):
-                        st.success(
-                            "Prospek berhasil dikirim ke Google Sheets."
-                        )
-                        st.rerun()
-                    else:
-                        st.error(
-                            "Data belum dikonfirmasi tersimpan."
-                        )
-                        st.json(hasil_simpan)
-
-                except Exception as e:
-                    st.error("Gagal menyimpan prospek.")
-                    st.code(str(e))
+                except Exception as exc:
+                    st.error(f"Gagal menambahkan calon klien: {exc}")
 
 
-# ==================================================
-# 4. STUDIO KONTEN
-# ==================================================
+# ------------------------------------------------------------
+# 11. STUDIO KONTEN
+# ------------------------------------------------------------
+
 elif page == "Studio Konten":
-    st.markdown("## 🎨 Studio Konten")
-    st.caption(
-        "Perencanaan konten. Publikasi otomatis belum diaktifkan."
+    header(
+        "Studio Konten",
+        "Buat materi promosi dan komunikasi pemasaran secara lebih terstruktur.",
     )
 
-    edited = st.data_editor(
-        st.session_state.content,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="content_editor",
-    )
-    st.session_state.content = edited
-
-    st.download_button(
-        "⬇️ Unduh kalender konten CSV",
-        st.session_state.content.to_csv(
-            index=False
-        ).encode("utf-8-sig"),
-        "arthama_kalender_konten.csv",
-        "text/csv",
+    jenis = st.selectbox(
+        "Jenis konten",
+        [
+            "Caption Instagram",
+            "Konten Facebook",
+            "Pesan promosi WhatsApp",
+            "Naskah video pendek",
+            "Prompt video AI",
+            "Deskripsi produk / paket wisata",
+            "Follow-up calon klien",
+            "Artikel SEO website",
+        ],
     )
 
-    st.markdown("### Buat brief konten baru")
-    with st.form("content_brief"):
-        topic = st.text_input(
-            "Tema promosi",
-            placeholder="Paket gathering perusahaan 2D1N",
-        )
-        channel = st.multiselect(
-            "Kanal",
-            ["Instagram", "Facebook", "TikTok"],
-            default=["Instagram", "Facebook"],
-        )
-        goal = st.selectbox(
-            "Tujuan",
-            [
-                "Mendapatkan pertanyaan harga",
-                "Mendapatkan reservasi",
-                "Membangun kepercayaan",
-                "Mencari klien perusahaan",
-            ],
-        )
-        audience = st.text_input(
-            "Target audiens",
-            placeholder="HRD, GA, panitia gathering, keluarga",
-        )
+    brand = st.selectbox(
+        "Brand / layanan",
+        [
+            "Arthama Management",
+            "Robinson Cisarua",
+            "Villa / penginapan",
+            "Paket wisata",
+            "Outbound / gathering",
+            "Brand lainnya",
+        ],
+    )
 
-        if st.form_submit_button("Simpan brief"):
-            if topic.strip():
-                newrow = pd.DataFrame([{
-                    "Tanggal": str(date.today()),
-                    "Kanal": " + ".join(channel),
-                    "Konten": (
-                        topic.strip()
-                        + " | Tujuan: " + goal
-                        + " | Target: " + audience
-                    ),
-                    "Status": "Brief baru",
-                }])
+    target = st.text_input(
+        "Target audiens",
+        placeholder="Contoh: HRD, perusahaan, keluarga, sekolah",
+    )
+    produk = st.text_area(
+        "Informasi produk dan penawaran",
+        placeholder=(
+            "Masukkan harga, fasilitas, lokasi, tanggal, keunggulan, "
+            "dan kontak yang memang ingin dicantumkan."
+        ),
+        height=130,
+    )
+    gaya = st.selectbox(
+        "Gaya komunikasi",
+        [
+            "Profesional dan meyakinkan",
+            "Ramah dan tidak terlalu menjual",
+            "Premium dan elegan",
+            "Ceria dan energik",
+            "Singkat dan langsung",
+        ],
+    )
+    cta = st.text_input(
+        "Ajakan tindakan (CTA)",
+        value="Hubungi kami untuk informasi dan reservasi.",
+    )
 
-                st.session_state.content = pd.concat(
-                    [st.session_state.content, newrow],
-                    ignore_index=True,
-                )
-                st.success("Brief tersimpan selama sesi ini.")
-                st.rerun()
-            else:
-                st.error("Tema promosi harus diisi.")
+    if st.button("Buat konten", type="primary", use_container_width=True):
+        if not produk.strip():
+            st.warning("Isi informasi produk terlebih dahulu.")
+        else:
+            prompt = f"""
+Buat materi konten pemasaran untuk Arthama Management atau layanan terkait.
+
+Jenis konten: {jenis}
+Brand/layanan: {brand}
+Target audiens: {target or "Belum ditentukan"}
+Informasi produk:
+{produk}
+
+Gaya komunikasi: {gaya}
+CTA yang diinginkan: {cta}
+
+Ketentuan:
+- Gunakan bahasa Indonesia yang alami dan profesional.
+- Jangan menambah harga, fasilitas, diskon, alamat, atau klaim
+  yang tidak tercantum dalam informasi produk.
+- Buat hasil siap disalin dan digunakan.
+- Sesuaikan panjang dan format dengan jenis konten.
+- Untuk naskah video, sertakan urutan visual dan voice-over.
+- Untuk prompt video AI, jelaskan gerakan kamera, subjek,
+  pencahayaan, suasana, dan teks yang harus tampil dengan jelas.
+- Untuk artikel SEO, buat judul, meta description, heading,
+  dan isi yang mudah dibaca.
+"""
+            with st.spinner("Studio Konten sedang bekerja..."):
+                try:
+                    hasil = tanya_gemini(prompt)
+                    st.session_state.content_result = hasil
+                    st.success("Konten berhasil dibuat.")
+                except Exception as exc:
+                    tampilkan_error_ai(exc)
+
+    if st.session_state.content_result:
+        st.subheader("Hasil Studio Konten")
+        st.markdown(st.session_state.content_result)
+        st.download_button(
+            "Unduh konten sebagai TXT",
+            data=st.session_state.content_result.encode("utf-8"),
+            file_name="arthama_studio_konten.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+        if st.button("Kosongkan hasil konten"):
+            st.session_state.content_result = ""
+            st.rerun()
 
 
-# ==================================================
-# 5. KONEKSI AKUN — MENU TERPISAH
-# ==================================================
+# ------------------------------------------------------------
+# 12. KONEKSI AKUN
+# ------------------------------------------------------------
+
 elif page == "Koneksi Akun":
-    st.markdown("## 🔌 Koneksi Akun")
-    st.info(
-        "Informasi akun resmi Arthama Management. "
-        "Status pencatatan bukan verifikasi koneksi otomatis."
+    header(
+        "Koneksi Akun",
+        "Ringkasan akun kerja dan pemeriksaan konektivitas layanan.",
     )
 
-    details = {
-        "Gmail": {
-            "description": "Email resmi untuk komunikasi dan penawaran.",
-            "account": "arthamamanagement@gmail.com",
-            "url": "https://mail.google.com/",
-        },
-        "Instagram": {
-            "description": "Akun promosi dan dokumentasi kegiatan.",
-            "account": "@arthamamanagement",
-            "url": "https://www.instagram.com/arthamamanagement/",
-        },
-        "Facebook Page": {
-            "description": "Halaman promosi dan komunikasi pelanggan.",
-            "account": "arthamavillapuncak",
-            "url": "https://www.facebook.com/arthamavillapuncak",
-        },
-        "TikTok": {
-            "description": "Video promosi dan dokumentasi kegiatan.",
-            "account": "@arthamamanagement",
-            "url": "https://www.tiktok.com/@arthamamanagement",
-        },
-        "Metricool": {
-            "description": "Pengelolaan dan penjadwalan konten.",
-            "account": "Belum diatur",
-            "url": "https://metricool.com/",
-        },
-        "Google Sheets": {
-            "description": "Database utama calon klien.",
-            "account": "Database CRM sudah digunakan",
-            "url": None,
-        },
-        "WhatsApp Business": {
-            "description": "Kontak komunikasi dan reservasi pelanggan.",
-            "account": "087868239249",
-            "url": "https://wa.me/6287868239249",
-        },
-    }
+    st.subheader("Akun dan kanal bisnis")
 
-    status_options = [
-        "Belum diperiksa",
-        "Direncanakan",
-        "Terhubung (manual)",
+    akun = [
+        ("Gmail", "arthamamanagement@gmail.com", "Email bisnis"),
+        ("Instagram", "arthamamanagement", "Kanal media sosial"),
+        ("Facebook", "arthamavillapuncak", "Kanal media sosial"),
+        ("TikTok", "arthamamanagement", "Kanal media sosial"),
+        ("WhatsApp", "087868239249", "Kontak bisnis"),
+        ("Google Sheets", "Database calon klien Arthama", "CRM"),
+        ("Metricool", "Akun pemasaran", "Perencanaan media sosial"),
     ]
 
-    for service, item in details.items():
+    for nama_akun, identitas, fungsi in akun:
         with st.container(border=True):
-            st.markdown(f"### {service}")
-            st.caption(item["description"])
-            st.write(f"**Akun:** {item['account']}")
-
-            if item["url"]:
-                st.markdown(f"[Buka {service}]({item['url']})")
-
-            if service == "Google Sheets":
-                st.success(
-                    "Database CRM tetap menggunakan konektor yang sudah ada."
-                )
-
-            current = st.session_state.connections.get(
-                service,
-                "Belum diperiksa",
-            )
-            if current not in status_options:
-                current = "Belum diperiksa"
-
-            choice = st.selectbox(
-                "Status pencatatan",
-                status_options,
-                index=status_options.index(current),
-                key=f"conn_{service}",
-            )
-
-            if st.button(
-                f"Simpan status {service}",
-                key=f"save_{service}",
-            ):
-                st.session_state.connections[service] = choice
-                st.success(
-                    "Status pencatatan diperbarui. "
-                    "Koneksi eksternal belum diverifikasi otomatis."
-                )
-
-    st.markdown("### 📋 Tahapan integrasi")
-    st.write("1. Pertahankan koneksi Google Sheets yang sudah berjalan.")
-    st.write("2. Evaluasi integrasi Gmail.")
-    st.write("3. Evaluasi integrasi resmi Meta untuk Instagram dan Facebook.")
-    st.write("4. Periksa opsi integrasi TikTok dan Metricool.")
-    st.write("5. Evaluasi WhatsApp Business Platform jika diperlukan.")
+            kiri, kanan = st.columns([3, 1])
+            with kiri:
+                st.markdown(f"**{nama_akun}**")
+                st.write(identitas)
+                st.caption(fungsi)
+            with kanan:
+                st.caption("Status akun")
+                st.write("Belum diverifikasi")
 
     st.caption(
-        "Status pencatatan saat ini menggunakan session state Streamlit; "
-        "status dapat hilang saat sesi berakhir."
+        "Daftar di atas merupakan informasi akun yang dicatat dalam aplikasi. "
+        "Ini bukan bukti bahwa OAuth, API, atau sinkronisasi otomatis "
+        "telah aktif."
     )
 
+    st.divider()
+    st.subheader("Tes koneksi CRM")
 
-# ==================================================
-# 6. PENGATURAN & KEAMANAN
-# ==================================================
+    st.write(
+        "Tes ini mengirim action `list` ke Apps Script yang sudah disiapkan. "
+        "Tidak melakukan perubahan data."
+    )
+
+    if st.button("Tes koneksi Google Sheets", type="primary"):
+        with st.spinner("Memeriksa koneksi CRM..."):
+            try:
+                result = arthama_api("list")
+                st.session_state.connection_test_result = {
+                    "success": True,
+                    "time": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+                    "result": result,
+                }
+            except Exception as exc:
+                st.session_state.connection_test_result = {
+                    "success": False,
+                    "time": datetime.now().strftime("%d-%m-%Y %H:%M:%S"),
+                    "error": str(exc),
+                }
+
+    hasil_tes = st.session_state.connection_test_result
+    if hasil_tes:
+        st.caption(f"Waktu tes: {hasil_tes['time']}")
+        if hasil_tes["success"]:
+            st.success("Konektor merespons permintaan list.")
+            with st.expander("Detail respons"):
+                st.json(hasil_tes["result"])
+        else:
+            st.error("Tes koneksi gagal.")
+            st.code(hasil_tes["error"])
+
+    st.divider()
+    st.subheader("Tes layanan Gemini")
+    st.write(
+        "Tes ini mengirim satu permintaan singkat ke Gemini dan dapat "
+        "menggunakan kuota API."
+    )
+
+    if st.button("Tes Gemini AI"):
+        with st.spinner("Memeriksa layanan Gemini..."):
+            try:
+                jawaban = tanya_gemini(
+                    "Jawab singkat dalam bahasa Indonesia: "
+                    "Koneksi AI Arthama sedang diuji."
+                )
+                st.success("Gemini berhasil memberikan respons.")
+                st.write(jawaban)
+            except Exception as exc:
+                tampilkan_error_ai(exc)
+
+
+# ------------------------------------------------------------
+# 13. PENGATURAN DAN KEAMANAN
+# ------------------------------------------------------------
+
 elif page == "Pengaturan & Keamanan":
-    st.markdown("## 🛡️ Pengaturan & Keamanan")
-
-    st.markdown("""
-    <div class='panel'>
-    <h3>Prinsip keamanan</h3>
-    <ul>
-      <li>Jangan simpan kata sandi akun sosial di kode aplikasi.</li>
-      <li>Gunakan OAuth atau otorisasi resmi untuk integrasi.</li>
-      <li>Aktifkan autentikasi dua faktor pada akun penting.</li>
-      <li>Minta persetujuan manusia sebelum pesan dikirim.</li>
-      <li>Hormati persetujuan penerima dan permintaan berhenti.</li>
-      <li>Batasi akses ke data prospek.</li>
-    </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("### Status kemampuan")
-    st.dataframe(
-        pd.DataFrame([
-            {
-                "Fitur": "Dashboard dan navigasi",
-                "Status": "Prototipe",
-            },
-            {
-                "Fitur": "CRM Google Sheets",
-                "Status": "Menggunakan konektor yang sudah tersedia",
-            },
-            {
-                "Fitur": "Ekspor CSV",
-                "Status": "Tersedia",
-            },
-            {
-                "Fitur": "Kalender dan brief konten",
-                "Status": "Data sesi aplikasi",
-            },
-            {
-                "Fitur": "Login multi-pengguna",
-                "Status": "Belum tersedia",
-            },
-            {
-                "Fitur": "Publikasi media sosial otomatis",
-                "Status": "Belum terintegrasi",
-            },
-            {
-                "Fitur": "Email / WhatsApp otomatis",
-                "Status": "Belum terintegrasi",
-            },
-            {
-                "Fitur": "Robot AI berjalan mandiri",
-                "Status": "Belum tersedia",
-            },
-        ]),
-        use_container_width=True,
-        hide_index=True,
+    header(
+        "Pengaturan & Keamanan",
+        "Periksa konfigurasi aplikasi dan lindungi akses layanan.",
     )
 
+    st.subheader("Status konfigurasi")
 
-# ---------- FOOTER ----------
-st.markdown("---")
-st.markdown(
-    "<div class='small'>ARTHAMA MANAGEMENT · AI AGENCY | "
-    "Prototype v0.1 · Local data</div>",
-    unsafe_allow_html=True,
+    konfigurasi = [
+        ("GEMINI_API_KEY", bool(secret_value("GEMINI_API_KEY"))),
+        ("GEMINI_MODEL", bool(secret_value("GEMINI_MODEL", "gemini-2.5-flash"))),
+        ("ARTHAMA_WEBAPP_URL", bool(secret_value("ARTHAMA_WEBAPP_URL"))),
+        ("ARTHAMA_API_TOKEN", bool(secret_value("ARTHAMA_API_TOKEN"))),
+    ]
+
+    for nama, tersedia in konfigurasi:
+        kiri, kanan = st.columns([3, 1])
+        kiri.write(nama)
+        if tersedia:
+            kanan.success("Tersedia")
+        else:
+            kanan.error("Belum diatur")
+
+    st.caption(
+        "Aplikasi hanya menampilkan apakah konfigurasi tersedia. "
+        "Nilai rahasia tidak ditampilkan."
+    )
+
+    st.divider()
+    st.subheader("Cara mengatur Streamlit Secrets")
+
+    st.markdown(
+        """
+        Buka dashboard Streamlit, pilih aplikasi, kemudian buka
+        **Settings → Secrets**. Pastikan formatnya seperti berikut:
+
+        ```toml
+        GEMINI_API_KEY = "ISI_API_KEY_DI_DASHBOARD"
+        GEMINI_MODEL = "gemini-2.5-flash"
+        ARTHAMA_WEBAPP_URL = "ISI_URL_APPS_SCRIPT"
+        ARTHAMA_API_TOKEN = "ISI_TOKEN_YANG_SAMA_DENGAN_APPS_SCRIPT"
+        ```
+
+        Ganti nilai contoh dengan konfigurasi yang benar milikmu.
+        Jangan menaruh API key atau token di file Python publik.
+        """
+    )
+
+    st.divider()
+    st.subheader("Praktik keamanan")
+    st.markdown(
+        """
+        - Jangan menyimpan API key di kode yang diunggah ke repository publik.
+        - Jangan membagikan token Apps Script atau kredensial akun.
+        - Batasi akses editor repository dan dashboard Streamlit.
+        - Pertahankan backup aplikasi dan database sebelum perubahan besar.
+        - Uji penambahan data CRM menggunakan data percobaan yang jelas.
+        - Periksa kuota Gemini di Google AI Studio jika permintaan gagal.
+        """
+    )
+
+    st.divider()
+    st.subheader("Informasi aplikasi")
+    st.write(f"Nama aplikasi: {APP_NAME}")
+    st.write(f"Versi: {APP_VERSION}")
+    st.write("Platform: Streamlit")
+    st.write("Database CRM: Google Sheets melalui Apps Script")
+
+
+# ------------------------------------------------------------
+# 14. FOOTER
+# ------------------------------------------------------------
+
+st.divider()
+st.caption(
+    f"{APP_NAME} • Versi {APP_VERSION} • "
+    "Gunakan data dan hasil AI dengan verifikasi yang sesuai."
 )
