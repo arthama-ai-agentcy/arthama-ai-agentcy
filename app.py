@@ -498,4 +498,4 @@ elif page == "Pengaturan & Keamanan":
     st.caption("Saran untuk versi berikutnya: simpan data ke Google Sheets, lalu tambahkan OAuth dan automasi terukur. Jangan menambahkan kredensial langsung ke kode.")
 
 st.markdown("---")
-st.markdown("<div class='small'>ARTHAMA MANAGEMENT · AI AGENCY | Prototype v0.1 · Local/demo data only</div>", unsafe_allow_html=True)
+st.markdown("<div class='small'>ARTHAMA MANAGEMENT · AI AGENCY | Prototype v0.1 · Local data </div>", unsafe_allow_html=True)
