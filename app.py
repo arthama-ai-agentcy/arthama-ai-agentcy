@@ -15,9 +15,8 @@ from google.genai import types
 # ============================================================
 
 APP_NAME = "Arthama AI Agency"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
-# Gunakan ID database lama yang sebelumnya sudah berfungsi.
 DEFAULT_SHEET_ID = "1UmTUxXTPpOIj_La59KC62VrMyQNsLgd-kdIRGTk7qsY"
 
 DEFAULT_WEBAPP_URL = (
@@ -25,7 +24,6 @@ DEFAULT_WEBAPP_URL = (
     "AKfycbyLAeTxCerquzVtH4QSd87nAWNEkT-jT774uIONUMgxnEjvDJlVD1FmF6Tu3NmsL_-fXg/exec"
 )
 
-# Model mengikuti permintaan pemilik proyek.
 GEMINI_MODEL = "gemini-3.8-flash"
 
 DIVISIONS = {
@@ -55,6 +53,16 @@ DIVISIONS = {
     ),
 }
 
+# Nama divisi yang dikirim ke n8n Switch.
+N8N_DIVISIONS = {
+    "AI Director": "director",
+    "AI Marketing": "marketing",
+    "AI Sales": "sales",
+    "AI Research": "research",
+    "AI Customer Care": "customer_care",
+    "AI Analyst": "analyst",
+}
+
 PROSPECT_COLUMNS = [
     "tanggalMasuk",
     "namaKlien",
@@ -68,6 +76,19 @@ PROSPECT_COLUMNS = [
     "tindakLanjut",
     "catatan",
 ]
+
+
+# ============================================================
+# STREAMLIT PAGE CONFIG
+# Harus diletakkan sebelum perintah Streamlit lainnya.
+# ============================================================
+
+st.set_page_config(
+    page_title=APP_NAME,
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 
 # ============================================================
@@ -100,6 +121,74 @@ def get_api_token():
 
 def get_sheet_id():
     return get_config("GOOGLE_SHEET_ID", DEFAULT_SHEET_ID)
+
+
+def get_n8n_url():
+    return get_config("N8N_WEBHOOK_URL")
+
+
+# ============================================================
+# N8N CONNECTOR
+# ============================================================
+
+def send_n8n_event(department, event="ai_task_started"):
+    """
+    Mengirim event minimal ke n8n.
+    Tidak mengirim isi tugas, hasil AI, data pelanggan,
+    API key Gemini, atau token Google Sheets.
+    """
+
+    webhook_url = get_n8n_url()
+
+    if not webhook_url:
+        return {
+            "success": False,
+            "message": "N8N_WEBHOOK_URL belum dikonfigurasi.",
+        }
+
+    division_code = N8N_DIVISIONS.get(department)
+
+    if not division_code:
+        return {
+            "success": False,
+            "message": "Nama divisi belum memiliki kode n8n.",
+        }
+
+    payload = {
+        "division": division_code,
+        "event": event,
+        "source": APP_NAME,
+        "version": APP_VERSION,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    try:
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=20,
+        )
+
+        response.raise_for_status()
+
+        try:
+            result = response.json()
+        except ValueError:
+            result = {"message": response.text[:500]}
+
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "message": "Webhook n8n menerima permintaan.",
+            "response": result,
+        }
+
+    except requests.RequestException as exc:
+        return {
+            "success": False,
+            "message": f"Koneksi n8n gagal: {exc}",
+        }
 
 
 # ============================================================
@@ -162,10 +251,9 @@ KONTEKS BISNIS:
         return "Gemini tidak mengembalikan teks. Silakan coba lagi."
 
     except Exception as exc:
-        message = str(exc)
         return (
             "Permintaan ke Gemini gagal.\n\n"
-            f"Detail: {message}\n\n"
+            f"Detail: {str(exc)}\n\n"
             "Periksa API key, akses model, kuota, dan nama model "
             "yang tersedia pada akun Gemini API Anda."
         )
@@ -173,13 +261,10 @@ KONTEKS BISNIS:
 
 # ============================================================
 # GOOGLE SHEETS CONNECTOR
+# Apps Script dan database lama tetap dipertahankan.
 # ============================================================
 
 def sheets_request(action, data=None):
-    """
-    Memanggil Apps Script yang sudah digunakan proyek.
-    Apps Script harus memeriksa ARTHAMA_API_TOKEN.
-    """
     url = get_webapp_url()
     token = get_api_token()
 
@@ -242,7 +327,6 @@ def sheets_request(action, data=None):
 
 
 def load_prospects():
-    """Membaca data prospek dari database yang terhubung."""
     result = sheets_request("list")
 
     if result.get("success") is not True:
@@ -278,7 +362,6 @@ def load_prospects():
 
 
 def save_prospect(form_data):
-    """Menambahkan satu prospek melalui Apps Script."""
     result = sheets_request("add", form_data)
 
     if result.get("success") is True:
@@ -301,15 +384,8 @@ if "last_prospects" not in st.session_state:
 
 
 # ============================================================
-# STREAMLIT LAYOUT
+# STREAMLIT STYLE
 # ============================================================
-
-st.set_page_config(
-    page_title=APP_NAME,
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 st.markdown(
     """
@@ -331,8 +407,13 @@ st.markdown(
 st.title("🤖 Arthama AI Agency")
 st.caption(
     "Master Professional System · Dashboard, divisi AI, "
-    "database prospek, dan status integrasi"
+    "database prospek, dan integrasi n8n"
 )
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
 
 with st.sidebar:
     st.header("Master Command Center")
@@ -351,7 +432,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(f"Versi aplikasi: {APP_VERSION}")
-    st.caption(f"Model yang dikonfigurasi: {GEMINI_MODEL}")
+    st.caption(f"Model: {GEMINI_MODEL}")
 
 
 # ============================================================
@@ -362,14 +443,14 @@ if page == "Dashboard":
     st.subheader("Ringkasan Operasional")
 
     gemini_ready = bool(get_gemini_key())
-    database_configured = bool(get_webapp_url() and get_api_token())
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "Divisi AI",
-        len(DIVISIONS),
+    database_configured = bool(
+        get_webapp_url() and get_api_token()
     )
+    n8n_ready = bool(get_n8n_url())
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Divisi AI", len(DIVISIONS))
 
     col2.metric(
         "Gemini API",
@@ -377,15 +458,19 @@ if page == "Dashboard":
     )
 
     col3.metric(
-        "Database",
+        "Google Sheets",
         "Konfigurasi tersedia"
-        if database_configured
-        else "Perlu konfigurasi",
+        if database_configured else "Perlu konfigurasi",
+    )
+
+    col4.metric(
+        "n8n",
+        "URL tersedia" if n8n_ready else "Belum dikonfigurasi",
     )
 
     st.info(
-        "Status konfigurasi bukan bukti bahwa layanan berhasil terhubung. "
-        "Gunakan menu Integrasi & Keamanan untuk melakukan pemeriksaan."
+        "Status konfigurasi bukan bukti layanan berhasil terhubung. "
+        "Gunakan menu Integrasi & Keamanan untuk menguji koneksi."
     )
 
     st.markdown("### Divisi yang tersedia")
@@ -397,9 +482,9 @@ if page == "Dashboard":
     st.markdown("### Alur kerja")
     st.write(
         "1. Pilih divisi pada AI Command Center.\n"
-        "2. Masukkan tugas atau kebutuhan bisnis.\n"
-        "3. Tinjau hasil AI sebelum digunakan.\n"
-        "4. Kelola prospek melalui database jika koneksi berhasil."
+        "2. Tugas dikerjakan oleh Gemini.\n"
+        "3. Informasi event divisi dikirim ke n8n.\n"
+        "4. Kelola prospek melalui Google Sheets."
     )
 
 
@@ -426,33 +511,61 @@ elif page == "AI Command Center":
 
     task = st.text_area(
         "Instruksi atau tugas",
-        placeholder=(
-            "Tuliskan tugas yang ingin dikerjakan oleh divisi AI..."
-        ),
+        placeholder="Tuliskan tugas yang ingin dikerjakan oleh divisi AI...",
         height=180,
     )
 
-    if st.button("Jalankan AI", type="primary", use_container_width=True):
+    if st.button(
+        "Jalankan AI",
+        type="primary",
+        use_container_width=True,
+    ):
         if not task.strip():
             st.warning("Masukkan tugas terlebih dahulu.")
+
         else:
             with st.spinner(f"{department} sedang bekerja..."):
+                # Gemini mengerjakan tugas.
                 answer = ask_gemini(
                     department,
                     task.strip(),
                     business_context.strip(),
                 )
 
+                # n8n menerima event divisi.
+                # Isi tugas dan jawaban tidak dikirim.
+                n8n_result = send_n8n_event(
+                    department,
+                    event="ai_task_completed",
+                )
+
             st.markdown("### Hasil")
             st.markdown(answer)
+
+            if n8n_result.get("success"):
+                st.success(
+                    "Event divisi berhasil dikirim ke n8n."
+                )
+            else:
+                st.warning(
+                    "Hasil Gemini tersedia, tetapi pengiriman event "
+                    f"ke n8n gagal: {n8n_result.get('message')}"
+                )
 
             st.session_state.ai_history.insert(
                 0,
                 {
-                    "waktu": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "waktu": datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
                     "divisi": department,
                     "tugas": task.strip(),
                     "hasil": answer,
+                    "n8n": (
+                        "Terkirim"
+                        if n8n_result.get("success")
+                        else "Gagal"
+                    ),
                 },
             )
 
@@ -488,13 +601,16 @@ elif page == "Database Prospek":
         )
     else:
         st.metric("Baris data terbaca", len(frame))
+
         st.dataframe(
             frame,
             use_container_width=True,
             hide_index=True,
         )
 
-        csv_data = frame.to_csv(index=False).encode("utf-8-sig")
+        csv_data = frame.to_csv(
+            index=False
+        ).encode("utf-8-sig")
 
         st.download_button(
             "Ekspor data CSV",
@@ -556,7 +672,10 @@ elif page == "Tambah Prospek":
 
     if submitted:
         if not nama.strip() or not kebutuhan.strip():
-            st.error("Nama klien dan kebutuhan acara wajib diisi.")
+            st.error(
+                "Nama klien dan kebutuhan acara wajib diisi."
+            )
+
         else:
             form_data = {
                 "tanggalMasuk": datetime.now().strftime("%Y-%m-%d"),
@@ -566,8 +685,7 @@ elif page == "Tambah Prospek":
                 "kebutuhanAcara": kebutuhan.strip(),
                 "tanggalAcara": (
                     tanggal_acara.isoformat()
-                    if tanggal_acara
-                    else ""
+                    if tanggal_acara else ""
                 ),
                 "jumlahPeserta": int(jumlah),
                 "budget": budget.strip(),
@@ -576,7 +694,9 @@ elif page == "Tambah Prospek":
                 "catatan": catatan.strip(),
             }
 
-            with st.spinner("Mengirim prospek ke Google Sheets..."):
+            with st.spinner(
+                "Mengirim prospek ke Google Sheets..."
+            ):
                 success, message = save_prospect(form_data)
 
             if success:
@@ -592,14 +712,12 @@ elif page == "Tambah Prospek":
 elif page == "Integrasi & Keamanan":
     st.subheader("Integrasi & Keamanan")
 
-    st.write(
-        "Halaman ini memeriksa konfigurasi dasar. "
-        "Status terhubung hanya ditampilkan setelah ada hasil pemeriksaan."
-    )
-
     st.markdown("### 1. Gemini API")
 
-    if st.button("Periksa Gemini API", key="test_gemini"):
+    if st.button(
+        "Periksa Gemini API",
+        key="test_gemini",
+    ):
         with st.spinner("Menguji akses Gemini..."):
             test_answer = ask_gemini(
                 "AI Director",
@@ -612,47 +730,121 @@ elif page == "Integrasi & Keamanan":
             st.error("Pengujian Gemini belum berhasil.")
             st.code(test_answer)
 
+    st.divider()
     st.markdown("### 2. Google Sheets melalui Apps Script")
 
-    if st.button("Periksa Google Sheets", key="test_sheets"):
+    if st.button(
+        "Periksa Google Sheets",
+        key="test_sheets",
+    ):
         with st.spinner("Memeriksa koneksi database..."):
             result = sheets_request("list")
 
         if result.get("success") is True:
-            st.success("Apps Script merespons dan aksi list berhasil.")
+            st.success(
+                "Apps Script merespons dan aksi list berhasil."
+            )
             st.write(
-                f"Jumlah baris yang diterima: "
+                "Jumlah baris yang diterima: "
                 f"{len(result.get('rows', []))}"
             )
         else:
             st.error("Koneksi database belum berhasil.")
-            st.write(result.get("message", "Kesalahan tidak diketahui."))
+            st.write(
+                result.get(
+                    "message",
+                    "Kesalahan tidak diketahui.",
+                )
+            )
 
-    st.markdown("### 3. Layanan eksternal")
+    st.divider()
+    st.markdown("### 3. n8n Automation")
+
+    if not get_n8n_url():
+        st.warning(
+            "N8N_WEBHOOK_URL belum ditemukan di Streamlit Secrets."
+        )
+    else:
+        st.success("URL webhook n8n sudah dikonfigurasi.")
+
+        if st.button(
+            "Periksa Koneksi n8n",
+            key="test_n8n",
+            type="primary",
+        ):
+            with st.spinner("Menghubungi webhook n8n..."):
+                n8n_result = send_n8n_event(
+                    "AI Marketing",
+                    event="connection_test",
+                )
+
+            if n8n_result.get("success"):
+                st.success(
+                    "Webhook n8n berhasil menerima permintaan."
+                )
+                st.write(
+                    "HTTP Status:",
+                    n8n_result.get("status_code"),
+                )
+                st.json(n8n_result.get("response", {}))
+            else:
+                st.error(
+                    n8n_result.get(
+                        "message",
+                        "Koneksi n8n gagal.",
+                    )
+                )
+
+    st.caption(
+        "Pemeriksaan ini menguji respons HTTP webhook. "
+        "Respons sukses belum membuktikan semua proses otomatis "
+        "di dalam workflow sudah selesai."
+    )
+
+    st.divider()
+    st.markdown("### 4. Layanan eksternal")
 
     integrations = [
-        ("Google Sheets", "Menggunakan Apps Script dan token API."),
-        ("Gmail", "Memerlukan integrasi Google OAuth."),
-        ("WhatsApp Business", "Memerlukan API atau penyedia resmi."),
-        ("Instagram / Facebook", "Memerlukan Meta OAuth dan izin yang sesuai."),
-        ("TikTok", "Memerlukan autentikasi dan akses API yang sesuai."),
+        (
+            "Google Sheets",
+            "Menggunakan Apps Script dan token API.",
+        ),
+        (
+            "Gmail",
+            "Memerlukan integrasi Google OAuth.",
+        ),
+        (
+            "WhatsApp Business",
+            "Memerlukan API atau penyedia resmi.",
+        ),
+        (
+            "Instagram / Facebook",
+            "Memerlukan Meta OAuth dan izin yang sesuai.",
+        ),
+        (
+            "TikTok",
+            "Memerlukan autentikasi dan akses API yang sesuai.",
+        ),
     ]
 
     for service, requirement in integrations:
         with st.expander(service):
             st.write(requirement)
             st.caption(
-                "Belum diverifikasi oleh aplikasi ini. "
-                "Jangan menganggap layanan telah terhubung."
+                "Belum diverifikasi oleh aplikasi ini."
             )
 
+    st.divider()
     st.markdown("### Keamanan")
+
     st.write(
         "- Simpan API key dan token pada Streamlit Secrets.\n"
         "- Jangan memasukkan rahasia ke kode publik GitHub.\n"
         "- Batasi akses editor repositori dan Google Sheets.\n"
         "- Jangan membagikan token API melalui chat.\n"
-        "- Periksa izin deployment Apps Script secara berkala."
+        "- Webhook n8n saat ini belum memakai autentikasi.\n"
+        "- Jangan mengirim data pelanggan melalui webhook "
+        "sebelum autentikasi dan perlindungan akses diaktifkan."
     )
 
 
@@ -670,8 +862,9 @@ elif page == "Riwayat AI":
             "Belum ada pekerjaan AI pada sesi aplikasi ini. "
             "Riwayat ini belum disimpan permanen ke Google Sheets."
         )
+
     else:
-        for index, item in enumerate(history):
+        for item in history:
             with st.expander(
                 f"{item['waktu']} · {item['divisi']}"
             ):
@@ -681,11 +874,21 @@ elif page == "Riwayat AI":
                 st.markdown("**Hasil**")
                 st.markdown(item["hasil"])
 
+                st.caption(
+                    f"Status event n8n: {item.get('n8n', 'Tidak diketahui')}"
+                )
+
         if st.button("Hapus Riwayat Sesi"):
             st.session_state.ai_history = []
             st.rerun()
 
+
+# ============================================================
+# FOOTER
+# ============================================================
+
 st.divider()
+
 st.caption(
     "Arthama AI Agency · Master Professional System · "
     "Tinjau hasil AI sebelum mengambil keputusan bisnis."
