@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import date
+from datetime import date, datetime
 
 # ---------- KONFIGURASI HALAMAN ----------
 st.set_page_config(
@@ -11,6 +11,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 
 # ---------- KONEKSI GOOGLE SHEETS ----------
 def arthama_api(action, data=None):
@@ -39,6 +40,28 @@ def arthama_api(action, data=None):
             f"Respons bukan JSON. HTTP {response.status_code}; "
             f"Isi respons: {response.text[:300]}"
         )
+
+
+# ---------- KONEKSI N8N ----------
+def send_n8n_event(division, event):
+    webhook_url = st.secrets["N8N_WEBHOOK_URL"]
+
+    payload = {
+        "division": division,
+        "event": event,
+        "source": "streamlit",
+        "version": "0.1",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    response = requests.post(
+        webhook_url,
+        json=payload,
+        timeout=20,
+    )
+
+    response.raise_for_status()
+    return response
 
 
 # ---------- TEMA ----------
@@ -245,6 +268,19 @@ with st.sidebar:
             st.error("Tes gagal. Periksa konfigurasi dan koneksi.")
             st.code(str(e))
 
+    if st.button("🔌 Tes Koneksi n8n"):
+        try:
+            hasil_tes_n8n = send_n8n_event(
+                division="system",
+                event="connection_test",
+            )
+            st.success(
+                f"Webhook n8n merespons. HTTP {hasil_tes_n8n.status_code}"
+            )
+        except Exception as e:
+            st.error("Koneksi n8n gagal.")
+            st.code(str(e))
+
 
 # ---------- HEADER ----------
 st.markdown("# ARTHAMA MANAGEMENT — AI AGENCY")
@@ -311,13 +347,12 @@ if page == "Command Center":
 
 
 # ==================================================
-# 2. DIVISI ROBOT AI
+# 2. DIVISI ROBOT AI + N8N
 # ==================================================
 elif page == "Divisi Robot AI":
     st.markdown("## 🤖 Ruang Kerja Divisi AI Arthama")
     st.caption(
-        "Ruang kerja dan pencatatan tugas setiap divisi. "
-        "Fitur pemrosesan AI belum diaktifkan pada versi ini."
+        "Catat tugas divisi dan kirim notifikasi metadata ke workflow n8n."
     )
 
     divisi = st.selectbox(
@@ -350,7 +385,33 @@ elif page == "Divisi Robot AI":
                 "Prioritas": prioritas,
                 "Status": "Menunggu tindakan manusia",
             })
-            st.success("Tugas berhasil dicatat.")
+
+            division_map = {
+                "AI Director": "director",
+                "AI Marketing": "marketing",
+                "AI Sales": "sales",
+                "AI Research": "research",
+                "AI Customer Care": "customer_care",
+                "AI Analyst": "analyst",
+            }
+
+            division_code = division_map[divisi]
+
+            try:
+                send_n8n_event(
+                    division=division_code,
+                    event="new_task",
+                )
+                st.success(
+                    "Tugas dicatat. Notifikasi berhasil dikirim ke n8n."
+                )
+            except Exception as e:
+                st.warning(
+                    "Tugas tercatat di sesi aplikasi, tetapi notifikasi "
+                    "n8n gagal dikirim."
+                )
+                st.code(str(e))
+
             st.rerun()
         else:
             st.warning("Silakan tulis tugas terlebih dahulu.")
@@ -671,6 +732,7 @@ elif page == "Koneksi Akun":
     st.write("3. Evaluasi integrasi resmi Meta untuk Instagram dan Facebook.")
     st.write("4. Periksa opsi integrasi TikTok dan Metricool.")
     st.write("5. Evaluasi WhatsApp Business Platform jika diperlukan.")
+    st.write("6. Hubungkan notifikasi tugas ke workflow n8n.")
 
     st.caption(
         "Status pencatatan saat ini menggunakan session state Streamlit; "
@@ -718,6 +780,10 @@ elif page == "Pengaturan & Keamanan":
                 "Status": "Data sesi aplikasi",
             },
             {
+                "Fitur": "Notifikasi workflow n8n",
+                "Status": "Terhubung melalui webhook",
+            },
+            {
                 "Fitur": "Login multi-pengguna",
                 "Status": "Belum tersedia",
             },
@@ -743,6 +809,6 @@ elif page == "Pengaturan & Keamanan":
 st.markdown("---")
 st.markdown(
     "<div class='small'>ARTHAMA MANAGEMENT · AI AGENCY | "
-    "Prototype v0.1 · Local data</div>",
+    "Prototype v0.1 · Google Sheets + n8n</div>",
     unsafe_allow_html=True,
 )
