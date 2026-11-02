@@ -386,6 +386,7 @@ elif page == "Divisi Robot AI":
                 "Status": "Menunggu tindakan manusia",
             })
 
+            # PEMETAAN 6 DIVISI KE SWITCH N8N
             division_map = {
                 "AI Director": "director",
                 "AI Marketing": "marketing",
@@ -403,7 +404,8 @@ elif page == "Divisi Robot AI":
                     event="new_task",
                 )
                 st.success(
-                    "Tugas dicatat. Notifikasi berhasil dikirim ke n8n."
+                    f"Tugas {divisi} dicatat. "
+                    "Notifikasi berhasil dikirim ke n8n."
                 )
             except Exception as e:
                 st.warning(
@@ -412,7 +414,6 @@ elif page == "Divisi Robot AI":
                 )
                 st.code(str(e))
 
-            st.rerun()
         else:
             st.warning("Silakan tulis tugas terlebih dahulu.")
 
