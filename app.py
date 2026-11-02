@@ -1,282 +1,21 @@
 
-import os
-import json
-from datetime import datetime
-
+import streamlit as st
 import pandas as pd
 import requests
-import streamlit as st
-from google import genai
-from google.genai import types
+from datetime import date
 
-
-# ============================================================
-# ARTHAMA AI AGENCY — MASTER PROFESSIONAL SYSTEM
-# ============================================================
-
-APP_NAME = "Arthama AI Agency"
-APP_VERSION = "1.1.0"
-
-DEFAULT_SHEET_ID = "1UmTUxXTPpOIj_La59KC62VrMyQNsLgd-kdIRGTk7qsY"
-
-DEFAULT_WEBAPP_URL = (
-    "https://script.google.com/macros/s/"
-    "AKfycbyLAeTxCerquzVtH4QSd87nAWNEkT-jT774uIONUMgxnEjvDJlVD1FmF6Tu3NmsL_-fXg/exec"
-)
-
-GEMINI_MODEL = "gemini-3.8-flash"
-
-DIVISIONS = {
-    "AI Director": (
-        "Direktur AI Arthama. Susun strategi, prioritaskan pekerjaan, "
-        "koordinasikan divisi, dan berikan keputusan operasional yang terukur."
-    ),
-    "AI Marketing": (
-        "Spesialis marketing. Buat strategi pemasaran, konten media sosial, "
-        "copywriting, promosi, branding, SEO, dan kampanye pemasaran."
-    ),
-    "AI Sales": (
-        "Spesialis penjualan. Buat strategi follow-up prospek, penawaran, "
-        "skrip WhatsApp, analisis kebutuhan pelanggan, dan strategi closing."
-    ),
-    "AI Research": (
-        "Analis riset. Teliti informasi yang diberikan, bandingkan alternatif, "
-        "identifikasi asumsi, risiko, dan data yang masih perlu diverifikasi."
-    ),
-    "AI Customer Care": (
-        "Spesialis layanan pelanggan. Susun jawaban yang ramah, profesional, "
-        "jelas, solutif, dan sesuai kebutuhan pelanggan."
-    ),
-    "AI Analyst": (
-        "Analis bisnis. Analisis data, prospek, performa, anggaran, "
-        "estimasi biaya, margin, serta peluang dan risiko bisnis."
-    ),
-}
-
-# Nama divisi yang dikirim ke n8n Switch.
-N8N_DIVISIONS = {
-    "AI Director": "director",
-    "AI Marketing": "marketing",
-    "AI Sales": "sales",
-    "AI Research": "research",
-    "AI Customer Care": "customer_care",
-    "AI Analyst": "analyst",
-}
-
-PROSPECT_COLUMNS = [
-    "tanggalMasuk",
-    "namaKlien",
-    "whatsapp",
-    "perusahaan",
-    "kebutuhanAcara",
-    "tanggalAcara",
-    "jumlahPeserta",
-    "budget",
-    "statusProspek",
-    "tindakLanjut",
-    "catatan",
-]
-
-
-# ============================================================
-# STREAMLIT PAGE CONFIG
-# ============================================================
-
+# ---------- KONFIGURASI HALAMAN ----------
 st.set_page_config(
-    page_title=APP_NAME,
+    page_title="Arthama Management — AI Agency",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-def get_config(name, default=""):
-    """Ambil konfigurasi dari Streamlit Secrets atau environment."""
-    try:
-        value = st.secrets.get(name, None)
-        if value is not None:
-            return str(value)
-    except Exception:
-        pass
-
-    return os.getenv(name, default)
-
-
-def get_gemini_key():
-    return get_config("GEMINI_API_KEY")
-
-
-def get_webapp_url():
-    return get_config("ARTHAMA_WEBAPP_URL", DEFAULT_WEBAPP_URL)
-
-
-def get_api_token():
-    return get_config("ARTHAMA_API_TOKEN")
-
-
-def get_sheet_id():
-    return get_config("GOOGLE_SHEET_ID", DEFAULT_SHEET_ID)
-
-
-def get_n8n_url():
-    return get_config("N8N_WEBHOOK_URL")
-
-
-# ============================================================
-# N8N CONNECTOR
-# ============================================================
-
-def send_n8n_event(department, event="ai_task_started"):
-    """
-    Mengirim event minimal ke n8n.
-    Tidak mengirim isi tugas, hasil AI, data pelanggan,
-    API key Gemini, atau token Google Sheets.
-    """
-
-    webhook_url = get_n8n_url()
-
-    if not webhook_url:
-        return {
-            "success": False,
-            "message": "N8N_WEBHOOK_URL belum dikonfigurasi.",
-        }
-
-    division_code = N8N_DIVISIONS.get(department)
-
-    if not division_code:
-        return {
-            "success": False,
-            "message": "Nama divisi belum memiliki kode n8n.",
-        }
-
-    payload = {
-        "division": division_code,
-        "event": event,
-        "source": APP_NAME,
-        "version": APP_VERSION,
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-    }
-
-    try:
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={"Content-Type": "application/json"},
-            timeout=20,
-        )
-
-        response.raise_for_status()
-
-        try:
-            result = response.json()
-        except ValueError:
-            result = {"message": response.text[:500]}
-
-        return {
-            "success": True,
-            "status_code": response.status_code,
-            "message": "Webhook n8n menerima permintaan.",
-            "response": result,
-        }
-
-    except requests.RequestException as exc:
-        return {
-            "success": False,
-            "message": f"Koneksi n8n gagal: {exc}",
-        }
-
-
-# ============================================================
-# GEMINI AI
-# ============================================================
-
-def ask_gemini(department, task, business_context=""):
-    """Kirim tugas ke Gemini dan kembalikan jawaban teks."""
-    api_key = get_gemini_key()
-
-    if not api_key:
-        return (
-            "GEMINI_API_KEY belum ditemukan. Tambahkan API key pada "
-            "Streamlit Secrets. Jangan menuliskan API key di kode publik."
-        )
-
-    if department not in DIVISIONS:
-        department = "AI Director"
-
-    system_instruction = f"""
-Anda adalah bagian dari {APP_NAME}.
-
-DIVISI:
-{department}
-
-TANGGUNG JAWAB:
-{DIVISIONS[department]}
-
-ATURAN KERJA:
-1. Gunakan bahasa Indonesia yang profesional dan mudah dipahami.
-2. Berikan solusi yang praktis dan dapat dilaksanakan.
-3. Jangan mengarang data, harga, hasil riset, atau status integrasi.
-4. Bedakan fakta, estimasi, asumsi, dan rekomendasi.
-5. Jika informasi kurang, jelaskan apa yang perlu dikonfirmasi.
-6. Susun jawaban dengan judul dan daftar jika membantu.
-7. Jangan mengklaim sudah melakukan tindakan di aplikasi eksternal
-   jika tindakan tersebut belum benar-benar dilakukan.
-
-KONTEKS BISNIS:
-{business_context or "Belum ada konteks bisnis tambahan."}
-"""
-
-    try:
-        client = genai.Client(api_key=api_key)
-
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=task,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.4,
-            ),
-        )
-
-        answer = getattr(response, "text", None)
-
-        if answer:
-            return answer
-
-        return "Gemini tidak mengembalikan teks. Silakan coba lagi."
-
-    except Exception as exc:
-        return (
-            "Permintaan ke Gemini gagal.\n\n"
-            f"Detail: {str(exc)}\n\n"
-            "Periksa API key, akses model, kuota, dan nama model "
-            "yang tersedia pada akun Gemini API Anda."
-        )
-
-
-# ============================================================
-# GOOGLE SHEETS CONNECTOR
-# ============================================================
-
-def sheets_request(action, data=None):
-    url = get_webapp_url()
-    token = get_api_token()
-
-    if not url:
-        return {
-            "success": False,
-            "message": "ARTHAMA_WEBAPP_URL belum dikonfigurasi.",
-        }
-
-    if not token:
-        return {
-            "success": False,
-            "message": "ARTHAMA_API_TOKEN belum dikonfigurasi.",
-        }
+# ---------- KONEKSI GOOGLE SHEETS ----------
+def arthama_api(action, data=None):
+    url = st.secrets["ARTHAMA_WEBAPP_URL"]
+    token = st.secrets["ARTHAMA_API_TOKEN"]
 
     payload = {
         "action": action,
@@ -286,840 +25,724 @@ def sheets_request(action, data=None):
     if data is not None:
         payload["data"] = data
 
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=30,
+    )
+    response.raise_for_status()
+
     try:
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=30,
+        return response.json()
+    except ValueError:
+        raise RuntimeError(
+            f"Respons bukan JSON. HTTP {response.status_code}; "
+            f"Isi respons: {response.text[:300]}"
         )
 
-        response.raise_for_status()
 
+# ---------- TEMA ----------
+st.markdown("""
+<style>
+:root {
+    --navy: #081426;
+    --blue: #2478ff;
+    --cyan: #44d7e8;
+}
+.stApp {
+    background: linear-gradient(
+        135deg, #071323 0%, #0b1e37 48%, #101d35 100%
+    );
+    color: #eef5ff;
+}
+[data-testid="stSidebar"] {
+    background: #091629;
+    border-right: 1px solid #203755;
+}
+h1, h2, h3 {
+    color: #f3f8ff !important;
+}
+p, label, .stMarkdown {
+    color: #d4e1f5;
+}
+div[data-testid="stMetric"] {
+    background: rgba(20,43,72,.78);
+    padding: 16px;
+    border: 1px solid #254567;
+    border-radius: 16px;
+}
+div[data-testid="stMetricValue"] {
+    color: #ffffff;
+}
+div.stButton > button {
+    border-radius: 10px;
+    border: 1px solid #3c8bff;
+    background: linear-gradient(90deg,#1d63dc,#168eae);
+    color: white;
+    font-weight: 600;
+}
+.panel {
+    background: rgba(17,37,64,.86);
+    border: 1px solid #254567;
+    border-radius: 18px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+}
+.small {
+    color: #a9bdd8;
+    font-size: .88rem;
+}
+.pill {
+    display: inline-block;
+    border: 1px solid #2f668f;
+    color: #9cecf4;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: .78rem;
+    margin-right: 5px;
+}
+.robot {
+    font-size: 2rem;
+}
+hr {
+    border-color: #25405e;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+# ---------- DATA DEMO ----------
+if "leads" not in st.session_state:
+    st.session_state.leads = pd.DataFrame([
+        {
+            "Perusahaan": "PT Guhring Indonesia",
+            "Kota": "Bekasi",
+            "Potensi": "Corporate outing / team building",
+            "Status": "Email terkirim",
+            "Follow-up": "2026-10-30",
+            "Estimasi (Rp)": 25000000,
+        },
+        {
+            "Perusahaan": "PT Tigaraksa Satria Tbk",
+            "Kota": "Jakarta",
+            "Potensi": "Family gathering",
+            "Status": "Prospek baru",
+            "Follow-up": "2026-10-29",
+            "Estimasi (Rp)": 40000000,
+        },
+        {
+            "Perusahaan": "Cargill Indonesia",
+            "Kota": "Jakarta",
+            "Potensi": "Meeting & team building",
+            "Status": "Riset awal",
+            "Follow-up": "2026-11-02",
+            "Estimasi (Rp)": 30000000,
+        },
+        {
+            "Perusahaan": "PT Summarecon Agung Tbk",
+            "Kota": "Bekasi",
+            "Potensi": "Employee gathering",
+            "Status": "Prospek baru",
+            "Follow-up": "2026-11-03",
+            "Estimasi (Rp)": 50000000,
+        },
+        {
+            "Perusahaan": "PT Misuba Guna Indonesia",
+            "Kota": "Bogor",
+            "Potensi": "Outbound",
+            "Status": "Riset awal",
+            "Follow-up": "2026-11-04",
+            "Estimasi (Rp)": 20000000,
+        },
+    ])
+
+if "content" not in st.session_state:
+    st.session_state.content = pd.DataFrame([
+        {
+            "Tanggal": "2026-10-27",
+            "Kanal": "Instagram + Facebook",
+            "Konten": "Promo Inflatable Games Team Building",
+            "Status": "Draft / perlu konfirmasi",
+        },
+        {
+            "Tanggal": "2026-10-29",
+            "Kanal": "Instagram",
+            "Konten": "Paket Lembang Bandung 2D1N",
+            "Status": "Rencana",
+        },
+        {
+            "Tanggal": "2026-10-31",
+            "Kanal": "Facebook",
+            "Konten": "Promo villa weekday satu jutaan",
+            "Status": "Rencana",
+        },
+    ])
+
+if "connections" not in st.session_state:
+    st.session_state.connections = {}
+
+if "tasks" not in st.session_state:
+    st.session_state.tasks = [
+        {
+            "Tugas": "Cek respons penawaran PT Guhring Indonesia",
+            "Divisi": "AI Sales",
+            "Prioritas": "Tinggi",
+            "Status": "Menunggu tindakan manusia",
+        },
+        {
+            "Tugas": "Siapkan caption paket Lembang",
+            "Divisi": "AI Marketing",
+            "Prioritas": "Sedang",
+            "Status": "Siap dikerjakan",
+        },
+        {
+            "Tugas": "Lengkapi kontak publik prospek",
+            "Divisi": "AI Research",
+            "Prioritas": "Sedang",
+            "Status": "Perlu riset",
+        },
+    ]
+
+
+# ---------- SIDEBAR / NAVIGASI ----------
+with st.sidebar:
+    st.markdown("## 🤖 ARTHAMA")
+    st.markdown(
+        "<span class='small'>MANAGEMENT · AI AGENCY</span>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("---")
+
+    page = st.radio(
+        "RUANG KERJA",
+        [
+            "Command Center",
+            "Divisi Robot AI",
+            "Sales CRM",
+            "Studio Konten",
+            "Koneksi Akun",
+            "Pengaturan & Keamanan",
+        ],
+    )
+
+    st.markdown("---")
+    st.markdown(
+        "<span class='pill'>PROTOTIPE</span> "
+        "<span class='pill'>MODE AMAN</span>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Integrasi eksternal hanya aktif jika telah disiapkan "
+        "dan diuji secara resmi."
+    )
+
+    if st.button("🔌 Tes Koneksi Google Sheets"):
         try:
-            result = response.json()
-        except ValueError:
-            return {
-                "success": False,
-                "message": (
-                    "Respons Apps Script bukan JSON. "
-                    "Periksa URL deployment dan izin akses Web App."
-                ),
-            }
-
-        if not isinstance(result, dict):
-            return {
-                "success": False,
-                "message": "Format respons database tidak sesuai.",
-            }
-
-        if result.get("success") is False:
-            return result
-
-        return result
-
-    except requests.RequestException as exc:
-        return {
-            "success": False,
-            "message": f"Koneksi Google Sheets gagal: {exc}",
-        }
+            hasil_tes = arthama_api("list")
+            st.success("Permintaan berhasil dijalankan.")
+            st.json(hasil_tes)
+        except Exception as e:
+            st.error("Tes gagal. Periksa konfigurasi dan koneksi.")
+            st.code(str(e))
 
 
-def load_prospects():
-    result = sheets_request("list")
-
-    if result.get("success") is not True:
-        return pd.DataFrame(), result.get(
-            "message", "Data prospek belum berhasil dibaca."
-        )
-
-    rows = result.get("rows", [])
-
-    if not rows:
-        return pd.DataFrame(), "Database kosong."
-
-    headers = [str(item).strip() for item in rows[0]]
-    records = rows[1:]
-
-    if not any(headers):
-        return pd.DataFrame(), "Header database belum tersedia."
-
-    normalized_records = []
-
-    for row in records:
-        normalized_records.append(
-            list(row[:len(headers)])
-            + [""] * max(0, len(headers) - len(row))
-        )
-
-    frame = pd.DataFrame(
-        normalized_records,
-        columns=headers,
-    )
-
-    return frame, None
-
-
-def save_prospect(form_data):
-    result = sheets_request("add", form_data)
-
-    if result.get("success") is True:
-        return True, "Prospek berhasil dikirim ke database."
-
-    return False, result.get(
-        "message", "Prospek belum berhasil disimpan."
-    )
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "ai_history" not in st.session_state:
-    st.session_state.ai_history = []
-
-if "last_prospects" not in st.session_state:
-    st.session_state.last_prospects = pd.DataFrame()
-
-
-# ============================================================
-# STREAMLIT STYLE
-# ARTHAMA PROFESSIONAL BLUE & GOLD THEME
-# Hanya mengubah desain visual.
-# ============================================================
-
+# ---------- HEADER ----------
+st.markdown("# ARTHAMA MANAGEMENT — AI AGENCY")
 st.markdown(
-    """
-    <style>
-
-    /* =================================
-       GLOBAL BACKGROUND
-    ================================= */
-
-    .stApp {
-        background: linear-gradient(
-            145deg,
-            #f4f7fc 0%,
-            #eaf1fa 55%,
-            #f8faff 100%
-        );
-        color: #172b4d;
-    }
-
-    .block-container {
-        padding-top: 1.7rem;
-        padding-bottom: 2.5rem;
-        max-width: 1450px;
-    }
-
-    h1, h2, h3 {
-        color: #102f5b !important;
-        font-weight: 750 !important;
-        letter-spacing: -0.4px;
-    }
-
-    p, label {
-        color: #344966;
-    }
-
-    /* =================================
-       SIDEBAR
-    ================================= */
-
-    [data-testid="stSidebar"] {
-        background: linear-gradient(
-            180deg,
-            #102f5b 0%,
-            #174b82 55%,
-            #10345e 100%
-        );
-        border-right: 3px solid #d5ad55;
-    }
-
-    [data-testid="stSidebar"] * {
-        color: #ffffff !important;
-    }
-
-    [data-testid="stSidebar"] hr {
-        border-color: rgba(255,255,255,0.25);
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label {
-        background: rgba(255,255,255,0.08);
-        border-radius: 9px;
-        padding: 9px 12px;
-        margin-bottom: 5px;
-        transition: 0.2s ease;
-    }
-
-    [data-testid="stSidebar"] [role="radiogroup"] label:hover {
-        background: rgba(255,255,255,0.19);
-    }
-
-    /* =================================
-       MAIN HEADER
-    ================================= */
-
-    [data-testid="stAppViewBlockContainer"] h1 {
-        border-bottom: 3px solid #d5ad55;
-        padding-bottom: 12px;
-    }
-
-    /* =================================
-       METRIC CARDS
-    ================================= */
-
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #dce6f2;
-        border-left: 4px solid #2474bd;
-        border-radius: 14px;
-        padding: 18px;
-        box-shadow: 0 4px 14px rgba(16,47,91,0.07);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: #58708e !important;
-        font-weight: 600;
-    }
-
-    [data-testid="stMetricValue"] {
-        color: #123d70 !important;
-        font-weight: 750;
-    }
-
-    /* =================================
-       BUTTONS
-    ================================= */
-
-    .stButton > button,
-    .stDownloadButton > button,
-    .stFormSubmitButton > button {
-        background: linear-gradient(
-            100deg,
-            #174b82,
-            #2479bd
-        );
-        color: #ffffff !important;
-        border: none;
-        border-radius: 10px;
-        padding: 10px 18px;
-        font-weight: 650;
-        box-shadow: 0 3px 9px rgba(23,75,130,0.18);
-        transition: 0.2s ease;
-    }
-
-    .stButton > button:hover,
-    .stDownloadButton > button:hover,
-    .stFormSubmitButton > button:hover {
-        background: linear-gradient(
-            100deg,
-            #10345e,
-            #1d639f
-        );
-        border: none;
-        transform: translateY(-1px);
-    }
-
-    /* =================================
-       INPUT FIELDS
-    ================================= */
-
-    .stTextInput input,
-    .stTextArea textarea,
-    .stNumberInput input,
-    .stDateInput input {
-        background: #ffffff !important;
-        border: 1px solid #cbd9e9 !important;
-        border-radius: 9px !important;
-        color: #172b4d !important;
-    }
-
-    .stTextInput input:focus,
-    .stTextArea textarea:focus {
-        border-color: #2479bd !important;
-        box-shadow: 0 0 0 2px rgba(36,121,189,0.12);
-    }
-
-    /* =================================
-       SELECT BOX
-    ================================= */
-
-    [data-baseweb="select"] > div {
-        background: #ffffff;
-        border-radius: 9px;
-        border-color: #cbd9e9;
-    }
-
-    /* =================================
-       EXPANDER
-    ================================= */
-
-    [data-testid="stExpander"] {
-        background: #ffffff;
-        border: 1px solid #dce6f2;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(16,47,91,0.04);
-    }
-
-    [data-testid="stExpander"] summary {
-        color: #174b82;
-        font-weight: 650;
-    }
-
-    /* =================================
-       ALERTS
-    ================================= */
-
-    [data-testid="stAlert"] {
-        border-radius: 10px;
-    }
-
-    /* =================================
-       DATAFRAME
-    ================================= */
-
-    [data-testid="stDataFrame"] {
-        border: 1px solid #dce6f2;
-        border-radius: 12px;
-        overflow: hidden;
-    }
-
-    /* =================================
-       TABS
-    ================================= */
-
-    [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-
-    [data-baseweb="tab"] {
-        color: #174b82;
-        font-weight: 600;
-    }
-
-    /* =================================
-       DIVIDER
-    ================================= */
-
-    hr {
-        border-color: #d5e0ed;
-    }
-
-    /* =================================
-       FOOTER
-    ================================= */
-
-    [data-testid="stCaptionContainer"] {
-        color: #71839a;
-    }
-
-    /* =================================
-       RESPONSIVE MOBILE
-    ================================= */
-
-    @media (max-width: 768px) {
-        .block-container {
-            padding: 1rem 0.8rem 2rem;
-        }
-
-        h1 {
-            font-size: 1.65rem !important;
-        }
-
-        [data-testid="stMetric"] {
-            padding: 12px;
-        }
-    }
-
-    </style>
-    """,
+    "**Kantor virtual untuk pemasaran, penjualan, dan operasional bisnis.**"
+)
+st.markdown(
+    "<span class='pill'>BLUE FUTURE OFFICE</span>"
+    "<span class='pill'>HUMAN APPROVAL</span>"
+    "<span class='pill'>LOW-COST FIRST</span>",
     unsafe_allow_html=True,
 )
 
 
-st.title("🤖 Arthama AI Agency")
-st.caption(
-    "Master Professional System · Dashboard, divisi AI, "
-    "database prospek, dan integrasi n8n"
-)
+# ==================================================
+# 1. COMMAND CENTER
+# ==================================================
+if page == "Command Center":
+    st.markdown("## 🛰️ Command Center")
+    st.markdown(
+        "<div class='panel'><b>Selamat datang di kantor virtual Arthama.</b>"
+        "<br><span class='small'>Pantau prospek, konten, tugas, dan "
+        "kesiapan koneksi. Angka demo bukan aktivitas live.</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Prospek demo", len(st.session_state.leads))
+    c2.metric("Konten terencana", len(st.session_state.content))
+    c3.metric("Tugas terbuka", len(st.session_state.tasks))
+    c4.metric(
+        "Status tercatat terhubung",
+        sum(
+            v == "Terhubung (manual)"
+            for v in st.session_state.connections.values()
+        ),
+    )
+
+    st.markdown("### 🏢 Denah divisi")
+    rooms = [
+        ("🧭", "AI Director", "Prioritas dan pembagian tugas."),
+        ("📣", "AI Marketing", "Caption dan konsep promosi."),
+        ("🎯", "AI Sales", "Prospek dan tahapan penjualan."),
+        ("🔎", "AI Research", "Riset informasi bisnis publik."),
+        ("💬", "AI Customer Care", "Persiapan balasan pelanggan."),
+        ("📊", "AI Analyst", "Analisis data yang tersedia."),
+    ]
+
+    cols = st.columns(3)
+    for i, (emoji, title, desc) in enumerate(rooms):
+        with cols[i % 3]:
+            st.markdown(
+                f"<div class='panel'><div class='robot'>{emoji}</div>"
+                f"<h3>{title}</h3><span class='small'>{desc}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("### 📌 Daftar tugas")
+    st.dataframe(
+        pd.DataFrame(st.session_state.tasks),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
+# ==================================================
+# 2. DIVISI ROBOT AI
+# ==================================================
+elif page == "Divisi Robot AI":
+    st.markdown("## 🤖 Ruang Kerja Divisi AI Arthama")
+    st.caption(
+        "Ruang kerja dan pencatatan tugas setiap divisi. "
+        "Fitur pemrosesan AI belum diaktifkan pada versi ini."
+    )
 
-with st.sidebar:
-    st.header("Master Command Center")
-
-    page = st.radio(
-        "Pilih menu",
+    divisi = st.selectbox(
+        "Pilih divisi",
         [
-            "Dashboard",
-            "AI Command Center",
-            "Database Prospek",
-            "Tambah Prospek",
-            "Integrasi & Keamanan",
-            "Riwayat AI",
+            "AI Director",
+            "AI Marketing",
+            "AI Sales",
+            "AI Research",
+            "AI Customer Care",
+            "AI Analyst",
         ],
     )
 
-    st.divider()
-    st.caption(f"Versi aplikasi: {APP_VERSION}")
-    st.caption(f"Model: {GEMINI_MODEL}")
-
-
-# ============================================================
-# DASHBOARD
-# ============================================================
-
-if page == "Dashboard":
-    st.subheader("Ringkasan Operasional")
-
-    gemini_ready = bool(get_gemini_key())
-    database_configured = bool(
-        get_webapp_url() and get_api_token()
-    )
-    n8n_ready = bool(get_n8n_url())
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("Divisi AI", len(DIVISIONS))
-
-    col2.metric(
-        "Gemini API",
-        "API key tersedia" if gemini_ready else "Belum dikonfigurasi",
+    tugas = st.text_area(
+        "Tulis tugas yang akan dikerjakan",
+        placeholder="Contoh: Siapkan konsep penawaran gathering perusahaan.",
     )
 
-    col3.metric(
-        "Google Sheets",
-        "Konfigurasi tersedia"
-        if database_configured else "Perlu konfigurasi",
+    prioritas = st.selectbox(
+        "Prioritas",
+        ["Tinggi", "Sedang", "Rendah"],
     )
 
-    col4.metric(
-        "n8n",
-        "URL tersedia" if n8n_ready else "Belum dikonfigurasi",
-    )
-
-    st.info(
-        "Status konfigurasi bukan bukti layanan berhasil terhubung. "
-        "Gunakan menu Integrasi & Keamanan untuk menguji koneksi."
-    )
-
-    st.markdown("### Divisi yang tersedia")
-
-    for name, description in DIVISIONS.items():
-        with st.expander(name):
-            st.write(description)
-
-    st.markdown("### Alur kerja")
-    st.write(
-        "1. Pilih divisi pada AI Command Center.\n"
-        "2. Tugas dikerjakan oleh Gemini.\n"
-        "3. Informasi event divisi dikirim ke n8n.\n"
-        "4. Kelola prospek melalui Google Sheets."
-    )
-
-
-# ============================================================
-# AI COMMAND CENTER
-# ============================================================
-
-elif page == "AI Command Center":
-    st.subheader("AI Command Center")
-
-    department = st.selectbox(
-        "Pilih divisi AI",
-        list(DIVISIONS.keys()),
-    )
-
-    business_context = st.text_area(
-        "Konteks bisnis (opsional)",
-        placeholder=(
-            "Contoh: Arthama Management menyediakan jasa wisata, "
-            "event organizer, outbound, gathering, dan sewa villa."
-        ),
-        height=100,
-    )
-
-    task = st.text_area(
-        "Instruksi atau tugas",
-        placeholder="Tuliskan tugas yang ingin dikerjakan oleh divisi AI...",
-        height=180,
-    )
-
-    if st.button(
-        "Jalankan AI",
-        type="primary",
-        use_container_width=True,
-    ):
-        if not task.strip():
-            st.warning("Masukkan tugas terlebih dahulu.")
-
+    if st.button("📌 Catat Tugas Divisi"):
+        if tugas.strip():
+            st.session_state.tasks.append({
+                "Tugas": tugas.strip(),
+                "Divisi": divisi,
+                "Prioritas": prioritas,
+                "Status": "Menunggu tindakan manusia",
+            })
+            st.success("Tugas berhasil dicatat.")
+            st.rerun()
         else:
-            with st.spinner(f"{department} sedang bekerja..."):
-                answer = ask_gemini(
-                    department,
-                    task.strip(),
-                    business_context.strip(),
+            st.warning("Silakan tulis tugas terlebih dahulu.")
+
+    st.markdown("### Daftar tugas divisi")
+    st.dataframe(
+        pd.DataFrame(st.session_state.tasks),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+# ==================================================
+# 3. SALES CRM — GOOGLE SHEETS
+# ==================================================
+elif page == "Sales CRM":
+    st.markdown("## 🎯 Sales CRM — Database Prospek")
+    st.caption(
+        "Data dibaca dan ditambahkan melalui konektor Google Sheets "
+        "yang sudah disiapkan."
+    )
+
+    try:
+        hasil = arthama_api("list")
+
+        if not hasil.get("success"):
+            st.error("Database belum berhasil dibaca.")
+            st.json(hasil)
+        else:
+            rows = hasil.get("rows", [])
+
+            if rows:
+                headers = [str(h).strip() for h in rows[0]]
+                data_rows = rows[1:]
+                jumlah_kolom = len(headers)
+                data_bersih = []
+
+                for row_data in data_rows:
+                    row_data = list(row_data)
+                    row_data += [""] * max(
+                        0, jumlah_kolom - len(row_data)
+                    )
+                    data_bersih.append(row_data[:jumlah_kolom])
+
+                df = pd.DataFrame(
+                    data_bersih,
+                    columns=headers,
                 )
 
-                n8n_result = send_n8n_event(
-                    department,
-                    event="ai_task_completed",
-                )
-
-            st.markdown("### Hasil")
-            st.markdown(answer)
-
-            if n8n_result.get("success"):
                 st.success(
-                    "Event divisi berhasil dikirim ke n8n."
+                    f"Koneksi berhasil. Data terbaca: {len(df)} baris."
+                )
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                st.download_button(
+                    "⬇️ Unduh database CSV",
+                    df.to_csv(index=False).encode("utf-8-sig"),
+                    "arthama_database_prospek.csv",
+                    "text/csv",
                 )
             else:
-                st.warning(
-                    "Hasil Gemini tersedia, tetapi pengiriman event "
-                    f"ke n8n gagal: {n8n_result.get('message')}"
-                )
+                st.warning("Google Sheets belum berisi data.")
 
-            st.session_state.ai_history.insert(
-                0,
-                {
-                    "waktu": datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                    "divisi": department,
-                    "tugas": task.strip(),
-                    "hasil": answer,
-                    "n8n": (
-                        "Terkirim"
-                        if n8n_result.get("success")
-                        else "Gagal"
-                    ),
-                },
-            )
+    except Exception as e:
+        st.error("Gagal mengambil database Google Sheets.")
+        st.code(str(e))
 
-            st.download_button(
-                "Unduh hasil sebagai TXT",
-                data=answer,
-                file_name="arthama_ai_result.txt",
-                mime="text/plain",
-            )
+    st.divider()
+    st.markdown("### ➕ Tambah prospek baru")
 
-
-# ============================================================
-# DATABASE PROSPEK
-# ============================================================
-
-elif page == "Database Prospek":
-    st.subheader("Database Prospek")
-
-    if st.button("Muat Ulang Data", type="primary"):
-        with st.spinner("Mengambil data dari Google Sheets..."):
-            frame, error = load_prospects()
-            st.session_state.last_prospects = frame
-
-        if error:
-            st.warning(error)
-
-    frame = st.session_state.last_prospects
-
-    if frame.empty:
-        st.info(
-            "Belum ada data yang dimuat. Tekan Muat Ulang Data "
-            "untuk membaca Google Sheets."
-        )
-    else:
-        st.metric("Baris data terbaca", len(frame))
-
-        st.dataframe(
-            frame,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        csv_data = frame.to_csv(
-            index=False
-        ).encode("utf-8-sig")
-
-        st.download_button(
-            "Ekspor data CSV",
-            data=csv_data,
-            file_name="arthama_prospek.csv",
-            mime="text/csv",
-        )
-
-
-# ============================================================
-# TAMBAH PROSPEK
-# ============================================================
-
-elif page == "Tambah Prospek":
-    st.subheader("Tambah Prospek Baru")
-
-    with st.form("prospect_form"):
-        nama = st.text_input("Nama klien *")
+    with st.form("add_lead_permanent"):
+        nama = st.text_input("Nama klien")
         whatsapp = st.text_input("Nomor WhatsApp")
         perusahaan = st.text_input("Nama perusahaan")
-        kebutuhan = st.text_area("Kebutuhan acara *")
-
+        kebutuhan = st.text_input("Kebutuhan acara")
         tanggal_acara = st.date_input(
             "Tanggal acara",
-            value=None,
+            value=date.today(),
         )
-
         jumlah = st.number_input(
             "Jumlah peserta",
             min_value=0,
             step=1,
         )
-
-        budget = st.text_input(
-            "Budget",
-            placeholder="Contoh: Rp25.000.000",
-        )
-
+        budget = st.text_input("Budget (contoh: Rp15.000.000)")
         status = st.selectbox(
             "Status prospek",
             [
-                "Prospek Baru",
-                "Sudah Dihubungi",
-                "Menunggu Konfirmasi",
-                "Penawaran Dikirim",
-                "Deal",
-                "Tidak Lanjut",
+                "Prospek baru",
+                "Riset awal",
+                "Sudah dihubungi",
+                "Menunggu respons",
+                "Tertarik",
+                "Survei",
+                "DP masuk",
+                "Tidak lanjut",
             ],
         )
+        tindak_lanjut = st.text_input("Tindak lanjut berikutnya")
+        catatan = st.text_area("Catatan")
 
-        tindak_lanjut = st.text_input("Tindak lanjut")
-        catatan = st.text_area("Catatan tambahan")
+        submitted = st.form_submit_button("💾 Simpan ke Google Sheets")
 
-        submitted = st.form_submit_button(
-            "Simpan Prospek",
-            type="primary",
-            use_container_width=True,
-        )
-
-    if submitted:
-        if not nama.strip() or not kebutuhan.strip():
-            st.error(
-                "Nama klien dan kebutuhan acara wajib diisi."
-            )
-
-        else:
-            form_data = {
-                "tanggalMasuk": datetime.now().strftime("%Y-%m-%d"),
-                "namaKlien": nama.strip(),
-                "whatsapp": whatsapp.strip(),
-                "perusahaan": perusahaan.strip(),
-                "kebutuhanAcara": kebutuhan.strip(),
-                "tanggalAcara": (
-                    tanggal_acara.isoformat()
-                    if tanggal_acara else ""
-                ),
-                "jumlahPeserta": int(jumlah),
-                "budget": budget.strip(),
-                "statusProspek": status,
-                "tindakLanjut": tindak_lanjut.strip(),
-                "catatan": catatan.strip(),
-            }
-
-            with st.spinner(
-                "Mengirim prospek ke Google Sheets..."
-            ):
-                success, message = save_prospect(form_data)
-
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
-
-
-# ============================================================
-# INTEGRASI & KEAMANAN
-# ============================================================
-
-elif page == "Integrasi & Keamanan":
-    st.subheader("Integrasi & Keamanan")
-
-    st.markdown("### 1. Gemini API")
-
-    if st.button(
-        "Periksa Gemini API",
-        key="test_gemini",
-    ):
-        with st.spinner("Menguji akses Gemini..."):
-            test_answer = ask_gemini(
-                "AI Director",
-                "Balas hanya dengan teks: KONEKSI GEMINI BERHASIL",
-            )
-
-        if "KONEKSI GEMINI BERHASIL" in test_answer:
-            st.success("Gemini berhasil memberikan respons.")
-        else:
-            st.error("Pengujian Gemini belum berhasil.")
-            st.code(test_answer)
-
-    st.divider()
-    st.markdown("### 2. Google Sheets melalui Apps Script")
-
-    if st.button(
-        "Periksa Google Sheets",
-        key="test_sheets",
-    ):
-        with st.spinner("Memeriksa koneksi database..."):
-            result = sheets_request("list")
-
-        if result.get("success") is True:
-            st.success(
-                "Apps Script merespons dan aksi list berhasil."
-            )
-            st.write(
-                "Jumlah baris yang diterima: "
-                f"{len(result.get('rows', []))}"
-            )
-        else:
-            st.error("Koneksi database belum berhasil.")
-            st.write(
-                result.get(
-                    "message",
-                    "Kesalahan tidak diketahui.",
-                )
-            )
-
-    st.divider()
-    st.markdown("### 3. n8n Automation")
-
-    if not get_n8n_url():
-        st.warning(
-            "N8N_WEBHOOK_URL belum ditemukan di Streamlit Secrets."
-        )
-    else:
-        st.success("URL webhook n8n sudah dikonfigurasi.")
-
-        if st.button(
-            "Periksa Koneksi n8n",
-            key="test_n8n",
-            type="primary",
-        ):
-            with st.spinner("Menghubungi webhook n8n..."):
-                n8n_result = send_n8n_event(
-                    "AI Marketing",
-                    event="connection_test",
-                )
-
-            if n8n_result.get("success"):
-                st.success(
-                    "Webhook n8n berhasil menerima permintaan."
-                )
-                st.write(
-                    "HTTP Status:",
-                    n8n_result.get("status_code"),
-                )
-                st.json(n8n_result.get("response", {}))
-            else:
+        if submitted:
+            if not nama.strip() and not perusahaan.strip():
                 st.error(
-                    n8n_result.get(
-                        "message",
-                        "Koneksi n8n gagal.",
-                    )
+                    "Isi minimal nama klien atau nama perusahaan."
                 )
+            else:
+                data_prospek = {
+                    "tanggalMasuk": str(date.today()),
+                    "namaKlien": nama.strip(),
+                    "whatsapp": whatsapp.strip(),
+                    "perusahaan": perusahaan.strip(),
+                    "kebutuhanAcara": kebutuhan.strip(),
+                    "tanggalAcara": str(tanggal_acara),
+                    "jumlahPeserta": int(jumlah),
+                    "budget": budget.strip(),
+                    "statusProspek": status,
+                    "tindakLanjut": tindak_lanjut.strip(),
+                    "catatan": catatan.strip(),
+                }
 
+                try:
+                    hasil_simpan = arthama_api(
+                        "add",
+                        data_prospek,
+                    )
+
+                    if hasil_simpan.get("success"):
+                        st.success(
+                            "Prospek berhasil dikirim ke Google Sheets."
+                        )
+                        st.rerun()
+                    else:
+                        st.error(
+                            "Data belum dikonfirmasi tersimpan."
+                        )
+                        st.json(hasil_simpan)
+
+                except Exception as e:
+                    st.error("Gagal menyimpan prospek.")
+                    st.code(str(e))
+
+
+# ==================================================
+# 4. STUDIO KONTEN
+# ==================================================
+elif page == "Studio Konten":
+    st.markdown("## 🎨 Studio Konten")
     st.caption(
-        "Pemeriksaan ini menguji respons HTTP webhook. "
-        "Respons sukses belum membuktikan semua proses otomatis "
-        "di dalam workflow sudah selesai."
+        "Perencanaan konten. Publikasi otomatis belum diaktifkan."
     )
 
-    st.divider()
-    st.markdown("### 4. Layanan eksternal")
+    edited = st.data_editor(
+        st.session_state.content,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="content_editor",
+    )
+    st.session_state.content = edited
 
-    integrations = [
-        (
-            "Google Sheets",
-            "Menggunakan Apps Script dan token API.",
-        ),
-        (
-            "Gmail",
-            "Memerlukan integrasi Google OAuth.",
-        ),
-        (
-            "WhatsApp Business",
-            "Memerlukan API atau penyedia resmi.",
-        ),
-        (
-            "Instagram / Facebook",
-            "Memerlukan Meta OAuth dan izin yang sesuai.",
-        ),
-        (
-            "TikTok",
-            "Memerlukan autentikasi dan akses API yang sesuai.",
-        ),
+    st.download_button(
+        "⬇️ Unduh kalender konten CSV",
+        st.session_state.content.to_csv(
+            index=False
+        ).encode("utf-8-sig"),
+        "arthama_kalender_konten.csv",
+        "text/csv",
+    )
+
+    st.markdown("### Buat brief konten baru")
+    with st.form("content_brief"):
+        topic = st.text_input(
+            "Tema promosi",
+            placeholder="Paket gathering perusahaan 2D1N",
+        )
+        channel = st.multiselect(
+            "Kanal",
+            ["Instagram", "Facebook", "TikTok"],
+            default=["Instagram", "Facebook"],
+        )
+        goal = st.selectbox(
+            "Tujuan",
+            [
+                "Mendapatkan pertanyaan harga",
+                "Mendapatkan reservasi",
+                "Membangun kepercayaan",
+                "Mencari klien perusahaan",
+            ],
+        )
+        audience = st.text_input(
+            "Target audiens",
+            placeholder="HRD, GA, panitia gathering, keluarga",
+        )
+
+        if st.form_submit_button("Simpan brief"):
+            if topic.strip():
+                newrow = pd.DataFrame([{
+                    "Tanggal": str(date.today()),
+                    "Kanal": " + ".join(channel),
+                    "Konten": (
+                        topic.strip()
+                        + " | Tujuan: " + goal
+                        + " | Target: " + audience
+                    ),
+                    "Status": "Brief baru",
+                }])
+
+                st.session_state.content = pd.concat(
+                    [st.session_state.content, newrow],
+                    ignore_index=True,
+                )
+                st.success("Brief tersimpan selama sesi ini.")
+                st.rerun()
+            else:
+                st.error("Tema promosi harus diisi.")
+
+
+# ==================================================
+# 5. KONEKSI AKUN
+# ==================================================
+elif page == "Koneksi Akun":
+    st.markdown("## 🔌 Koneksi Akun")
+    st.info(
+        "Informasi akun resmi Arthama Management. "
+        "Status pencatatan bukan verifikasi koneksi otomatis."
+    )
+
+    details = {
+        "Gmail": {
+            "description": "Email resmi untuk komunikasi dan penawaran.",
+            "account": "arthamamanagement@gmail.com",
+            "url": "https://mail.google.com/",
+        },
+        "Instagram": {
+            "description": "Akun promosi dan dokumentasi kegiatan.",
+            "account": "@arthamamanagement",
+            "url": "https://www.instagram.com/arthamamanagement/",
+        },
+        "Facebook Page": {
+            "description": "Halaman promosi dan komunikasi pelanggan.",
+            "account": "arthamavillapuncak",
+            "url": "https://www.facebook.com/arthamavillapuncak",
+        },
+        "TikTok": {
+            "description": "Video promosi dan dokumentasi kegiatan.",
+            "account": "@arthamamanagement",
+            "url": "https://www.tiktok.com/@arthamamanagement",
+        },
+        "Metricool": {
+            "description": "Pengelolaan dan penjadwalan konten.",
+            "account": "Belum diatur",
+            "url": "https://metricool.com/",
+        },
+        "Google Sheets": {
+            "description": "Database utama calon klien.",
+            "account": "Database CRM sudah digunakan",
+            "url": None,
+        },
+        "WhatsApp Business": {
+            "description": "Kontak komunikasi dan reservasi pelanggan.",
+            "account": "087868239249",
+            "url": "https://wa.me/6287868239249",
+        },
+    }
+
+    status_options = [
+        "Belum diperiksa",
+        "Direncanakan",
+        "Terhubung (manual)",
     ]
 
-    for service, requirement in integrations:
-        with st.expander(service):
-            st.write(requirement)
-            st.caption(
-                "Belum diverifikasi oleh aplikasi ini."
+    for service, item in details.items():
+        with st.container(border=True):
+            st.markdown(f"### {service}")
+            st.caption(item["description"])
+            st.write(f"**Akun:** {item['account']}")
+
+            if item["url"]:
+                st.markdown(f"[Buka {service}]({item['url']})")
+
+            if service == "Google Sheets":
+                st.success(
+                    "Database CRM tetap menggunakan konektor yang sudah ada."
+                )
+
+            current = st.session_state.connections.get(
+                service,
+                "Belum diperiksa",
+            )
+            if current not in status_options:
+                current = "Belum diperiksa"
+
+            choice = st.selectbox(
+                "Status pencatatan",
+                status_options,
+                index=status_options.index(current),
+                key=f"conn_{service}",
             )
 
-    st.divider()
-    st.markdown("### Keamanan")
+            if st.button(
+                f"Simpan status {service}",
+                key=f"save_{service}",
+            ):
+                st.session_state.connections[service] = choice
+                st.success(
+                    "Status pencatatan diperbarui. "
+                    "Koneksi eksternal belum diverifikasi otomatis."
+                )
 
-    st.write(
-        "- Simpan API key dan token pada Streamlit Secrets.\n"
-        "- Jangan memasukkan rahasia ke kode publik GitHub.\n"
-        "- Batasi akses editor repositori dan Google Sheets.\n"
-        "- Jangan membagikan token API melalui chat.\n"
-        "- Webhook n8n saat ini belum memakai autentikasi.\n"
-        "- Jangan mengirim data pelanggan melalui webhook "
-        "sebelum autentikasi dan perlindungan akses diaktifkan."
+    st.markdown("### 📋 Tahapan integrasi")
+    st.write("1. Pertahankan koneksi Google Sheets yang sudah berjalan.")
+    st.write("2. Evaluasi integrasi Gmail.")
+    st.write("3. Evaluasi integrasi resmi Meta untuk Instagram dan Facebook.")
+    st.write("4. Periksa opsi integrasi TikTok dan Metricool.")
+    st.write("5. Evaluasi WhatsApp Business Platform jika diperlukan.")
+
+    st.caption(
+        "Status pencatatan saat ini menggunakan session state Streamlit; "
+        "status dapat hilang saat sesi berakhir."
     )
 
 
-# ============================================================
-# RIWAYAT AI
-# ============================================================
+# ==================================================
+# 6. PENGATURAN & KEAMANAN
+# ==================================================
+elif page == "Pengaturan & Keamanan":
+    st.markdown("## 🛡️ Pengaturan & Keamanan")
 
-elif page == "Riwayat AI":
-    st.subheader("Riwayat Pekerjaan AI")
+    st.markdown("""
+    <div class='panel'>
+    <h3>Prinsip keamanan</h3>
+    <ul>
+    <li>Jangan simpan kata sandi akun sosial di kode aplikasi.</li>
+    <li>Gunakan OAuth atau otorisasi resmi untuk integrasi.</li>
+    <li>Aktifkan autentikasi dua faktor pada akun penting.</li>
+    <li>Minta persetujuan manusia sebelum pesan dikirim.</li>
+    <li>Hormati persetujuan penerima dan permintaan berhenti.</li>
+    <li>Batasi akses ke data prospek.</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-    history = st.session_state.ai_history
+    st.markdown("### Status kemampuan")
+    st.dataframe(
+        pd.DataFrame([
+            {
+                "Fitur": "Dashboard dan navigasi",
+                "Status": "Prototipe",
+            },
+            {
+                "Fitur": "CRM Google Sheets",
+                "Status": "Menggunakan konektor yang sudah tersedia",
+            },
+            {
+                "Fitur": "Ekspor CSV",
+                "Status": "Tersedia",
+            },
+            {
+                "Fitur": "Kalender dan brief konten",
+                "Status": "Data sesi aplikasi",
+            },
+            {
+                "Fitur": "Login multi-pengguna",
+                "Status": "Belum tersedia",
+            },
+            {
+                "Fitur": "Publikasi media sosial otomatis",
+                "Status": "Belum terintegrasi",
+            },
+            {
+                "Fitur": "Email / WhatsApp otomatis",
+                "Status": "Belum terintegrasi",
+            },
+            {
+                "Fitur": "Robot AI berjalan mandiri",
+                "Status": "Belum tersedia",
+            },
+        ]),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    if not history:
-        st.info(
-            "Belum ada pekerjaan AI pada sesi aplikasi ini. "
-            "Riwayat ini belum disimpan permanen ke Google Sheets."
-        )
 
-    else:
-        for item in history:
-            with st.expander(
-                f"{item['waktu']} · {item['divisi']}"
-            ):
-                st.markdown("**Tugas**")
-                st.write(item["tugas"])
-
-                st.markdown("**Hasil**")
-                st.markdown(item["hasil"])
-
-                st.caption(
-                    f"Status event n8n: {item.get('n8n', 'Tidak diketahui')}"
-                )
-
-        if st.button("Hapus Riwayat Sesi"):
-            st.session_state.ai_history = []
-            st.rerun()
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.divider()
-
-st.caption(
-    "Arthama AI Agency · Master Professional System · "
-    "Tinjau hasil AI sebelum mengambil keputusan bisnis."
+# ---------- FOOTER ----------
+st.markdown("---")
+st.markdown(
+    "<div class='small'>ARTHAMA MANAGEMENT · AI AGENCY | "
+    "Prototype v0.1 · Local data</div>",
+    unsafe_allow_html=True,
 )
