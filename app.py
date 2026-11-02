@@ -80,7 +80,6 @@ PROSPECT_COLUMNS = [
 
 # ============================================================
 # STREAMLIT PAGE CONFIG
-# Harus diletakkan sebelum perintah Streamlit lainnya.
 # ============================================================
 
 st.set_page_config(
@@ -261,7 +260,6 @@ KONTEKS BISNIS:
 
 # ============================================================
 # GOOGLE SHEETS CONNECTOR
-# Apps Script dan database lama tetap dipertahankan.
 # ============================================================
 
 def sheets_request(action, data=None):
@@ -385,24 +383,259 @@ if "last_prospects" not in st.session_state:
 
 # ============================================================
 # STREAMLIT STYLE
+# ARTHAMA PROFESSIONAL BLUE & GOLD THEME
+# Hanya mengubah desain visual.
 # ============================================================
 
 st.markdown(
     """
     <style>
+
+    /* =================================
+       GLOBAL BACKGROUND
+    ================================= */
+
+    .stApp {
+        background: linear-gradient(
+            145deg,
+            #f4f7fc 0%,
+            #eaf1fa 55%,
+            #f8faff 100%
+        );
+        color: #172b4d;
+    }
+
     .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 2rem;
+        padding-top: 1.7rem;
+        padding-bottom: 2.5rem;
+        max-width: 1450px;
     }
+
+    h1, h2, h3 {
+        color: #102f5b !important;
+        font-weight: 750 !important;
+        letter-spacing: -0.4px;
+    }
+
+    p, label {
+        color: #344966;
+    }
+
+    /* =================================
+       SIDEBAR
+    ================================= */
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(
+            180deg,
+            #102f5b 0%,
+            #174b82 55%,
+            #10345e 100%
+        );
+        border-right: 3px solid #d5ad55;
+    }
+
+    [data-testid="stSidebar"] * {
+        color: #ffffff !important;
+    }
+
+    [data-testid="stSidebar"] hr {
+        border-color: rgba(255,255,255,0.25);
+    }
+
+    [data-testid="stSidebar"] [role="radiogroup"] label {
+        background: rgba(255,255,255,0.08);
+        border-radius: 9px;
+        padding: 9px 12px;
+        margin-bottom: 5px;
+        transition: 0.2s ease;
+    }
+
+    [data-testid="stSidebar"] [role="radiogroup"] label:hover {
+        background: rgba(255,255,255,0.19);
+    }
+
+    /* =================================
+       MAIN HEADER
+    ================================= */
+
+    [data-testid="stAppViewBlockContainer"] h1 {
+        border-bottom: 3px solid #d5ad55;
+        padding-bottom: 12px;
+    }
+
+    /* =================================
+       METRIC CARDS
+    ================================= */
+
     [data-testid="stMetric"] {
-        border: 1px solid rgba(128,128,128,0.25);
-        padding: 14px;
-        border-radius: 12px;
+        background: #ffffff;
+        border: 1px solid #dce6f2;
+        border-left: 4px solid #2474bd;
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: 0 4px 14px rgba(16,47,91,0.07);
     }
+
+    [data-testid="stMetricLabel"] {
+        color: #58708e !important;
+        font-weight: 600;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #123d70 !important;
+        font-weight: 750;
+    }
+
+    /* =================================
+       BUTTONS
+    ================================= */
+
+    .stButton > button,
+    .stDownloadButton > button,
+    .stFormSubmitButton > button {
+        background: linear-gradient(
+            100deg,
+            #174b82,
+            #2479bd
+        );
+        color: #ffffff !important;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 18px;
+        font-weight: 650;
+        box-shadow: 0 3px 9px rgba(23,75,130,0.18);
+        transition: 0.2s ease;
+    }
+
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background: linear-gradient(
+            100deg,
+            #10345e,
+            #1d639f
+        );
+        border: none;
+        transform: translateY(-1px);
+    }
+
+    /* =================================
+       INPUT FIELDS
+    ================================= */
+
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    .stDateInput input {
+        background: #ffffff !important;
+        border: 1px solid #cbd9e9 !important;
+        border-radius: 9px !important;
+        color: #172b4d !important;
+    }
+
+    .stTextInput input:focus,
+    .stTextArea textarea:focus {
+        border-color: #2479bd !important;
+        box-shadow: 0 0 0 2px rgba(36,121,189,0.12);
+    }
+
+    /* =================================
+       SELECT BOX
+    ================================= */
+
+    [data-baseweb="select"] > div {
+        background: #ffffff;
+        border-radius: 9px;
+        border-color: #cbd9e9;
+    }
+
+    /* =================================
+       EXPANDER
+    ================================= */
+
+    [data-testid="stExpander"] {
+        background: #ffffff;
+        border: 1px solid #dce6f2;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(16,47,91,0.04);
+    }
+
+    [data-testid="stExpander"] summary {
+        color: #174b82;
+        font-weight: 650;
+    }
+
+    /* =================================
+       ALERTS
+    ================================= */
+
+    [data-testid="stAlert"] {
+        border-radius: 10px;
+    }
+
+    /* =================================
+       DATAFRAME
+    ================================= */
+
+    [data-testid="stDataFrame"] {
+        border: 1px solid #dce6f2;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    /* =================================
+       TABS
+    ================================= */
+
+    [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+
+    [data-baseweb="tab"] {
+        color: #174b82;
+        font-weight: 600;
+    }
+
+    /* =================================
+       DIVIDER
+    ================================= */
+
+    hr {
+        border-color: #d5e0ed;
+    }
+
+    /* =================================
+       FOOTER
+    ================================= */
+
+    [data-testid="stCaptionContainer"] {
+        color: #71839a;
+    }
+
+    /* =================================
+       RESPONSIVE MOBILE
+    ================================= */
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding: 1rem 0.8rem 2rem;
+        }
+
+        h1 {
+            font-size: 1.65rem !important;
+        }
+
+        [data-testid="stMetric"] {
+            padding: 12px;
+        }
+    }
+
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 st.title("🤖 Arthama AI Agency")
 st.caption(
@@ -525,15 +758,12 @@ elif page == "AI Command Center":
 
         else:
             with st.spinner(f"{department} sedang bekerja..."):
-                # Gemini mengerjakan tugas.
                 answer = ask_gemini(
                     department,
                     task.strip(),
                     business_context.strip(),
                 )
 
-                # n8n menerima event divisi.
-                # Isi tugas dan jawaban tidak dikirim.
                 n8n_result = send_n8n_event(
                     department,
                     event="ai_task_completed",
